@@ -5,7 +5,6 @@ import com.cybertown.service.AIService;
 import com.cybertown.service.NPCSimulatorService;
 import com.cybertown.service.TimeService;
 import com.cybertown.repository.NPCRepository;
-import com.cybertown.domain.npc.NPCStats;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,28 +12,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 小镇API控制器
- * 提供RESTful API接口供前端或其他系统调用
- *
- * @RestController 表示这是一个REST控制器，返回值自动转为JSON
- * @RequestMapping 定义控制器的基础路径
+ * API控制器 - 处理HTTP请求
  */
 @RestController
-@RequestMapping("/api/town")  // 所有接口的前缀：/api/town
+@RequestMapping("/api/town")
 @RequiredArgsConstructor
 public class TownController {
 
-    // 依赖注入
+    // 注入服务
     private final NPCRepository npcRepository;
     private final AIService aiService;
-    private final TimeService timeService;
     private final NPCSimulatorService npcSimulatorService;
 
     /**
-     * 获取所有NPC
-     * GET /api/town/npcs
-     *
-     * @return NPC列表（自动转为JSON）
+     * 1. 获取所有NPC
      */
     @GetMapping("/npcs")
     public List<NPC> getAllNPCs() {
@@ -42,76 +33,48 @@ public class TownController {
     }
 
     /**
-     * 获取单个NPC
-     * GET /api/town/npc/{id}
-     *
-     * @PathVariable 表示从URL路径中获取参数
+     * 2. 获取单个NPC
      */
     @GetMapping("/npc/{id}")
     public NPC getNPC(@PathVariable String id) {
         return npcRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("NPC未找到: " + id));
+                .orElseThrow(() -> new RuntimeException("NPC未找到：" + id));
     }
 
     /**
-     * 与NPC对话
-     * POST /api/town/npc/{id}/talk
-     *
-     * @RequestBody 表示从请求体中获取JSON参数
+     * 3. 与NPC对话（调用AIService）
      */
     @PostMapping("/npc/{id}/talk")
     public Map<String, String> talkToNPC(@PathVariable String id,
                                          @RequestBody Map<String, String> request) {
-        // 从请求体中获取玩家消息
         String message = request.get("message");
-
-        // 获取NPC对象
         NPC npc = getNPC(id);
 
         // 调用AI服务生成回应
         String response = aiService.generateDialogue(npc, message);
 
-        // 返回JSON响应
         return Map.of(
                 "npc", npc.getName(),
                 "response", response,
-                "mood", getMoodFromStats(npc.getStats())  // 表情符号表示心情
+                "mood", getMoodEmoji(npc.getStats().getHappiness())
         );
     }
 
     /**
-     * 暂停时间
-     * POST /api/town/time/pause
+     * 4. 手动触发NPC更新（测试用）
      */
-    @PostMapping("/time/pause")
-    public String pauseTime() {
-        timeService.setPaused(true);
-        return "游戏时间已暂停";
+    @PostMapping("/npc/{id}/update")
+    public String updateNPCMannualy(@PathVariable String id) {
+        NPC npc = getNPC(id);
+
+        // 这里可以调用NPCSimulatorService的方法
+        // 或者直接模拟一次更新
+
+        return "已手动更新NPC：" + npc.getName();
     }
 
     /**
-     * 恢复时间
-     * POST /api/town/time/resume
-     */
-    @PostMapping("/time/resume")
-    public String resumeTime() {
-        timeService.setPaused(false);
-        return "游戏时间已恢复";
-    }
-
-    /**
-     * 快进时间
-     * POST /api/town/time/fast-forward/{hours}
-     */
-    @PostMapping("/time/fast-forward/{hours}")
-    public String fastForward(@PathVariable int hours) {
-        timeService.fastForward(hours);
-        return "快进了 " + hours + " 小时";
-    }
-
-    /**
-     * 初始化小镇（重新创建NPC）
-     * POST /api/town/init
+     * 5. 初始化小镇（创建NPC）
      */
     @PostMapping("/init")
     public String initializeTown() {
@@ -120,26 +83,23 @@ public class TownController {
     }
 
     /**
-     * 获取小镇状态
-     * GET /api/town/status
+     * 6. 获取小镇状态
      */
     @GetMapping("/status")
-    public Map<String, Object> getTownStatus() {
+    public Map<String, Object> getStatus() {
         return Map.of(
                 "npcCount", npcRepository.count(),
-                "message", "赛博小镇运行中"
+                "message", "赛博小镇运行正常",
+                "timestamp", System.currentTimeMillis()
         );
     }
 
-    /**
-     * 根据快乐值返回表情符号
-     * 私有工具方法，不在API中暴露
-     */
-    private String getMoodFromStats(NPCStats stats) {
-        if (stats.getHappiness() > 80) return "😊";
-        if (stats.getHappiness() > 60) return "🙂";
-        if (stats.getHappiness() > 40) return "😐";
-        if (stats.getHappiness() > 20) return "😔";
+    // 根据快乐度返回表情符号
+    private String getMoodEmoji(int happiness) {
+        if (happiness > 80) return "😊";
+        if (happiness > 60) return "🙂";
+        if (happiness > 40) return "😐";
+        if (happiness > 20) return "😔";
         return "😢";
     }
 }

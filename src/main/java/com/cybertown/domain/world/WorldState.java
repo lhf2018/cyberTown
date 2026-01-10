@@ -9,10 +9,8 @@ import java.time.LocalDateTime;
  * 世界状态类
  * 管理游戏世界的全局状态：时间、天气等
  *
- * @Component 表示这是一个Spring组件，会被自动管理
- * 不是JPA实体，因为世界状态是单例的，存储在内存中
  */
-@Component  // Spring注解：标记为组件，会被自动扫描和管理
+@Component
 @Data
 public class WorldState {
 

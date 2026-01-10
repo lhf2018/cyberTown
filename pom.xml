@@ -50,7 +50,17 @@
             <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
             <version>${spring-ai.version}</version>
         </dependency>
-
+        <!-- 在 pom.xml 的 dependencies 部分添加 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>0.28.0</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>0.28.0</version>
+        </dependency>
         <!-- ========== 数据库依赖 ========== -->
 
         <!-- H2内存数据库：开发测试用，无需安装，启动即用 -->

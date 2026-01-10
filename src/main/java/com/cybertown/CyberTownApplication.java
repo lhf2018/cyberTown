@@ -9,46 +9,32 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * Spring Boot主启动类
+ * 主启动类
  * 应用入口点
  */
-@Slf4j  // 日志
-@SpringBootApplication  // 标记为Spring Boot应用，包含：@Configuration, @EnableAutoConfiguration, @ComponentScan
-@EnableScheduling      // 启用定时任务支持
+@Slf4j
+@SpringBootApplication
+@EnableScheduling  // 启用定时任务，让NPC自动更新
 @RequiredArgsConstructor
 public class CyberTownApplication implements CommandLineRunner {
-    // 实现CommandLineRunner接口，可以在应用启动后执行代码
 
     private final NPCSimulatorService npcSimulatorService;
 
-    /**
-     * 主方法：应用入口
-     */
     public static void main(String[] args) {
-        // 启动Spring Boot应用
         SpringApplication.run(CyberTownApplication.class, args);
     }
 
-    /**
-     * 应用启动后执行
-     * CommandLineRunner接口的方法
-     */
     @Override
     public void run(String... args) {
         log.info("🚀 赛博小镇启动中...");
 
-        // 初始化NPC数据（如果数据库为空）
+        // 初始化NPC数据
         npcSimulatorService.initializeNPCs();
 
-        // 启动完成提示
-        log.info("🏙️ 赛博小镇已就绪！");
-        log.info("💡 访问 http://localhost:8080/h2-console 查看数据库");
-        log.info("   JDBC URL: jdbc:h2:mem:cybertown");
-        log.info("   用户名: sa, 密码: (空)");
-        log.info("💡 访问 API 端点:");
-        log.info("   GET  /api/town/npcs - 获取所有NPC");
-        log.info("   GET  /api/town/npc/{id} - 获取单个NPC");
-        log.info("   POST /api/town/npc/{id}/talk - 与NPC对话（需要Postman）");
-        log.info("   POST /api/town/init - 重新初始化小镇");
+        log.info("🏙️ 赛博小镇准备就绪！");
+        log.info("💡 你可以：");
+        log.info("   1. 查看所有NPC: GET http://localhost:8080/api/town/npcs");
+        log.info("   2. 与NPC对话: POST http://localhost:8080/api/town/npc/npc-1/talk");
+        log.info("   3. 查看H2数据库: http://localhost:8080/h2-console");
     }
 }
