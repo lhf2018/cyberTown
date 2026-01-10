@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * LangGraph4j 工具定义
@@ -14,7 +16,7 @@ import java.time.LocalDateTime;
  */
 @Slf4j
 @Component
-public class NPCDecisionTools implements DecisionAssistant {
+public class NPCDecisionTools {
 
     /**
      * 检查NPC基础需求 - 正确的参数定义
@@ -213,50 +215,6 @@ public class NPCDecisionTools implements DecisionAssistant {
         result.setLocationType(locationType);
 
         result.setTimestamp(LocalDateTime.now());
-        return result;
-    }
-
-    /**
-     * 综合决策
-     */
-    @Tool("综合所有因素为NPC做出最终决策")
-    public DecisionResult makeFinalDecision(
-            @V("NPC姓名") String npcName,
-            @V("NPC职业") String occupation,
-            @V("NPC性格") String personality,
-            @V("需求分析文本") String needsAnalysis,
-            @V("是否有紧急需求") boolean hasUrgentNeed,
-            @V("日程建议") String scheduleSuggestion,
-            @V("是否工作时间") boolean isWorkTime,
-            @V("社交建议") String socialSuggestion,
-            @V("社交优先级") String socialPriority,
-            @V("位置建议") String locationSuggestion,
-            @V("位置类型") String locationType,
-            @V("当前时间字符串") String currentTime
-    ) {
-        log.debug("LangGraph工具调用: makeFinalDecision for {}", npcName);
-
-        DecisionResult result = new DecisionResult();
-        result.setNpcName(npcName);
-        result.setTimestamp(LocalDateTime.now());
-
-        // 构建决策上下文
-        String context = buildDecisionContext(
-                npcName, occupation, personality, needsAnalysis,
-                hasUrgentNeed, scheduleSuggestion, isWorkTime,
-                socialSuggestion, socialPriority, locationSuggestion,
-                locationType, currentTime
-        );
-
-        // 生成决策
-        String decision = generateDecision(context);
-        String reason = generateDecisionReason(context);
-
-        result.setDecision(decision);
-        result.setReason(reason);
-        result.setConfidence(calculateConfidence(context));
-        result.setContext(context);
-
         return result;
     }
 
@@ -488,10 +446,25 @@ public class NPCDecisionTools implements DecisionAssistant {
     @Data
     public static class DecisionResult {
         private String npcName;
-        private String decision;
-        private String reason;
-        private int confidence;
-        private String context;
+        private String decision;      // 决策行动
+        private String newThought;    // 新想法
+        private String reason;        // 决策理由
+        private String source;        // 决策来源（AI/规则引擎）
+        private String aiAnalysis;    // AI分析过程（如果有）
         private LocalDateTime timestamp;
+
+        public Map<String, Object> toMap() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("npcName", npcName);
+            map.put("decision", decision);
+            map.put("newThought", newThought);
+            map.put("reason", reason);
+            map.put("source", source);
+            map.put("timestamp", timestamp.toString());
+            if (aiAnalysis != null) {
+                map.put("aiAnalysis", aiAnalysis);
+            }
+            return map;
+        }
     }
 }

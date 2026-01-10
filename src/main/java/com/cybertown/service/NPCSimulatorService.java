@@ -2,9 +2,9 @@ package com.cybertown.service;
 
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.npc.NPCStats;
-import com.cybertown.repository.NPCRepository;
 import com.cybertown.domain.world.WorldState;
-import jakarta.annotation.PostConstruct;
+import com.cybertown.graph.NPCDecisionTools;
+import com.cybertown.repository.NPCRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -38,8 +38,8 @@ public class NPCSimulatorService {
     private static final int SOCIAL_NEED_INCREASE_PER_MINUTE = 1; // 每分钟增加社交需求
 
     // ======================== 决策概率配置 ========================
-    private static final int DECISION_PROBABILITY = 30;        // 30%概率触发决策
-    private static final int MIN_DECISION_INTERVAL_MINUTES = 1; // 决策最小间隔15分钟
+    private static final int DECISION_PROBABILITY = 60;
+    private static final int MIN_DECISION_INTERVAL_MINUTES = 1;
 
     // ======================== 定时任务 ========================
 
@@ -72,8 +72,7 @@ public class NPCSimulatorService {
         }
 
         long elapsedTime = System.currentTimeMillis() - startTime;
-        log.info("心跳完成: 更新{}/{}个NPC，耗时{}ms",
-                updatedCount, npcs.size(), elapsedTime);
+        log.info("心跳完成: 更新{}/{}个NPC，耗时{}ms", updatedCount, npcs.size(), elapsedTime);
     }
 
     /**
@@ -108,6 +107,7 @@ public class NPCSimulatorService {
 
     /**
      * 更新单个NPC
+     *
      * @return 是否进行了状态更新
      */
     private boolean updateSingleNPC(NPC npc) {
@@ -127,8 +127,8 @@ public class NPCSimulatorService {
 
         // 3. 检查并执行决策
         if (shouldMakeDecision(npc)) {
-            String decision = decisionService.makeDecisionWithLangGraph(npc, worldState);
-            applyDecision(npc, decision);
+            NPCDecisionTools.DecisionResult decision = decisionService.makeDecisionWithLangGraph(npc, worldState);
+            apply(npc, decision);
             hasChanges = true;
 
             // 记录决策时间
@@ -182,9 +182,7 @@ public class NPCSimulatorService {
             stats.setHappiness(Math.max(0, Math.min(100, stats.getHappiness() + change)));
             if (oldHappiness != stats.getHappiness()) {
                 changed = true;
-                log.trace("NPC {} 心情波动: {} -> {} ({})",
-                        npc.getName(), oldHappiness, stats.getHappiness(),
-                        change > 0 ? "提升" : "下降");
+                log.trace("NPC {} 心情波动: {} -> {} ({})", npc.getName(), oldHappiness, stats.getHappiness(), change > 0 ? "提升" : "下降");
             }
         }
 
@@ -213,9 +211,7 @@ public class NPCSimulatorService {
         if (npc.getUpdatedAt() == null) return false;
 
         // 计算距离上次更新的分钟数
-        long minutesSinceLastUpdate = java.time.Duration.between(
-                npc.getUpdatedAt(), LocalDateTime.now()
-        ).toMinutes();
+        long minutesSinceLastUpdate = java.time.Duration.between(npc.getUpdatedAt(), LocalDateTime.now()).toMinutes();
 
         // 如果15分钟内更新过，且不是紧急需求，就跳过
         if (minutesSinceLastUpdate < MIN_DECISION_INTERVAL_MINUTES) {
@@ -235,7 +231,7 @@ public class NPCSimulatorService {
             return true;
         }
 
-        // 2. 随机概率（默认30%）
+        // 2. 随机概率
         boolean randomDecision = random.nextInt(100) < DECISION_PROBABILITY;
         if (randomDecision) {
             log.trace("NPC {} 随机触发决策", npc.getName());
@@ -260,18 +256,21 @@ public class NPCSimulatorService {
     /**
      * 应用决策结果
      */
-    private void applyDecision(NPC npc, String decision) {
+    private void apply(NPC npc, NPCDecisionTools.DecisionResult result) {
         // 设置新动作
-        npc.setCurrentAction(decision);
+        npc.setCurrentAction(result.getDecision());
 
         // 更新位置（如果决策中包含位置信息）
-        updateLocationFromDecision(npc, decision);
+        updateLocationFromDecision(npc, result.getDecision());
 
         // 根据决策类型更新属性
-        updateStatsFromDecision(npc, decision);
+        updateStatsFromDecision(npc, result.getDecision());
 
         // 记录决策时间
         npc.setUpdatedAt(LocalDateTime.now());
+
+        //记录新想法
+        npc.getCurrentThoughts().add(result.getNewThought());
     }
 
     /**
@@ -282,26 +281,14 @@ public class NPCSimulatorService {
         String currentLocation = npc.getCurrentLocation();
 
         // 位置推断规则
-        Map<String, String> locationKeywords = Map.of(
-                "酒吧|喝酒|饮酒|吧台", "霓虹酒吧",
-                "公司|工作|办公|编程|代码|开会", "科技公司",
-                "家|家里|回家|休息|睡觉|卧室", "公寓住宅",
-                "诊所|医院|看病|医生|治疗", "赛博诊所",
-                "警察局|执勤|巡逻|办案", "警察总局",
-                "黑市|交易|买卖|走私", "地下黑市",
-                "餐厅|吃饭|用餐|食堂|餐馆", "仿生餐厅",
-                "商场|购物|逛街|商店", "全息商场",
-                "公园|散步|运动|锻炼", "中央公园",
-                "街道|路上|马路|行走", "霓虹街道"
-        );
+        Map<String, String> locationKeywords = Map.of("酒吧|喝酒|饮酒|吧台", "霓虹酒吧", "公司|工作|办公|编程|代码|开会", "科技公司", "家|家里|回家|休息|睡觉|卧室", "公寓住宅", "诊所|医院|看病|医生|治疗", "赛博诊所", "警察局|执勤|巡逻|办案", "警察总局", "黑市|交易|买卖|走私", "地下黑市", "餐厅|吃饭|用餐|食堂|餐馆", "仿生餐厅", "商场|购物|逛街|商店", "全息商场", "公园|散步|运动|锻炼", "中央公园", "街道|路上|马路|行走", "霓虹街道");
 
         for (Map.Entry<String, String> entry : locationKeywords.entrySet()) {
             if (lowerDecision.matches(".*(" + entry.getKey() + ").*")) {
                 String newLocation = entry.getValue();
                 if (!newLocation.equals(currentLocation)) {
                     npc.setCurrentLocation(newLocation);
-                    log.debug("NPC {} 位置更新: {} -> {}",
-                            npc.getName(), currentLocation, newLocation);
+                    log.debug("NPC {} 位置更新: {} -> {}", npc.getName(), currentLocation, newLocation);
                 }
                 return;
             }
@@ -418,9 +405,7 @@ public class NPCSimulatorService {
     private boolean hasBeenInactiveTooLong(NPC npc) {
         if (npc.getUpdatedAt() == null) return true;
 
-        long hoursSinceUpdate = java.time.Duration.between(
-                npc.getUpdatedAt(), LocalDateTime.now()
-        ).toHours();
+        long hoursSinceUpdate = java.time.Duration.between(npc.getUpdatedAt(), LocalDateTime.now()).toHours();
 
         return hoursSinceUpdate >= 2; // 2小时没有更新
     }
@@ -479,16 +464,10 @@ public class NPCSimulatorService {
      * 查找需要设定长期目标的NPC
      */
     private List<NPC> findNPCsNeedingGoals() {
-        return npcRepository.findAll().stream()
-                .filter(npc -> npc.getCurrentGoal() == null || npc.getCurrentGoal().isEmpty())
-                .filter(npc -> npc.getUpdatedAt() != null)
-                .filter(npc -> {
-                    long hoursSinceGoalUpdate = java.time.Duration.between(
-                            npc.getUpdatedAt(), LocalDateTime.now()
-                    ).toHours();
-                    return hoursSinceGoalUpdate >= 4; // 4小时没有目标更新
-                })
-                .toList();
+        return npcRepository.findAll().stream().filter(npc -> npc.getCurrentGoal() == null || npc.getCurrentGoal().isEmpty()).filter(npc -> npc.getUpdatedAt() != null).filter(npc -> {
+            long hoursSinceGoalUpdate = java.time.Duration.between(npc.getUpdatedAt(), LocalDateTime.now()).toHours();
+            return hoursSinceGoalUpdate >= 4; // 4小时没有目标更新
+        }).toList();
     }
 
     /**
@@ -499,9 +478,7 @@ public class NPCSimulatorService {
         String personality = npc.getPersonality();
 
         String goal = switch (occupation) {
-            case "程序员" -> personality.contains("内向")
-                    ? "独立完成一个开源项目"
-                    : "与团队合作开发新产品";
+            case "程序员" -> personality.contains("内向") ? "独立完成一个开源项目" : "与团队合作开发新产品";
             case "设计师" -> "创作一件标志性的数字艺术品";
             case "警察" -> "提升辖区治安等级";
             case "医生" -> "研究新的治疗方案";
@@ -538,21 +515,10 @@ public class NPCSimulatorService {
         // 10个初始NPC配置
         Object[][] npcConfigs = {
                 // ID, 姓名, 职业, 性格, 初始位置
-                {"npc-1", "杰克", "程序员", "内向但善良，技术狂热", "科技公司"},
-                {"npc-2", "莉莉", "设计师", "外向时尚，艺术感强", "科技公司"},
-                {"npc-3", "老王", "酒吧老板", "精明务实，消息灵通", "霓虹酒吧"},
-                {"npc-4", "小李", "警察", "正义感强，责任心重", "警察总局"},
-                {"npc-5", "阿强", "黑市商人", "狡猾但守信，利益至上", "地下黑市"},
-                {"npc-6", "小美", "医生", "温柔体贴，富有同情心", "赛博诊所"},
-                {"npc-7", "大壮", "保安", "强壮忠诚，头脑简单", "全息商场"},
-                {"npc-8", "眼镜", "黑客", "技术天才，社交障碍", "网络空间"},
-                {"npc-9", "红姐", "舞者", "魅力四射，身世神秘", "霓虹酒吧"},
-                {"npc-10", "老陈", "出租车司机", "见多识广，爱讲故事", "霓虹街道"}
-        };
+                {"npc-1", "杰克", "程序员", "内向但善良，技术狂热", "科技公司"}, {"npc-2", "莉莉", "设计师", "外向时尚，艺术感强", "科技公司"}, {"npc-3", "老王", "酒吧老板", "精明务实，消息灵通", "霓虹酒吧"}, {"npc-4", "小李", "警察", "正义感强，责任心重", "警察总局"}, {"npc-5", "阿强", "黑市商人", "狡猾但守信，利益至上", "地下黑市"}, {"npc-6", "小美", "医生", "温柔体贴，富有同情心", "赛博诊所"}, {"npc-7", "大壮", "保安", "强壮忠诚，头脑简单", "全息商场"}, {"npc-8", "眼镜", "黑客", "技术天才，社交障碍", "网络空间"}, {"npc-9", "红姐", "舞者", "魅力四射，身世神秘", "霓虹酒吧"}, {"npc-10", "老陈", "出租车司机", "见多识广，爱讲故事", "霓虹街道"}};
 
         for (Object[] config : npcConfigs) {
-            createNPC((String)config[0], (String)config[1], (String)config[2],
-                    (String)config[3], (String)config[4]);
+            createNPC((String) config[0], (String) config[1], (String) config[2], (String) config[3], (String) config[4]);
         }
 
         log.info("NPC初始化完成，创建了{}个NPC", npcConfigs.length);
@@ -561,8 +527,7 @@ public class NPCSimulatorService {
     /**
      * 创建单个NPC
      */
-    private void createNPC(String id, String name, String occupation,
-                           String personality, String location) {
+    private void createNPC(String id, String name, String occupation, String personality, String location) {
         NPC npc = new NPC();
         npc.setId(id);
         npc.setName(name);
@@ -573,8 +538,7 @@ public class NPCSimulatorService {
         npc.setCurrentGoal(getInitialGoal(occupation));
 
         // 随机化属性（在合理范围内）
-        NPCStats stats = NPCStats.builder()
-                .energy(60 + random.nextInt(30))          // 60-90
+        NPCStats stats = NPCStats.builder().energy(60 + random.nextInt(30))          // 60-90
                 .hunger(20 + random.nextInt(40))          // 20-60
                 .happiness(50 + random.nextInt(40))       // 50-90
                 .socialNeed(30 + random.nextInt(40))      // 30-70
@@ -583,9 +547,7 @@ public class NPCSimulatorService {
         npc.setStats(stats);
 
         npcRepository.save(npc);
-        log.info("创建NPC: {} - {} (@{})，心情: {}，能量: {}，金钱: {}",
-                name, occupation, location,
-                stats.getHappiness(), stats.getEnergy(), stats.getMoney());
+        log.info("创建NPC: {} - {} (@{})，心情: {}，能量: {}，金钱: {}", name, occupation, location, stats.getHappiness(), stats.getEnergy(), stats.getMoney());
     }
 
     /**
@@ -634,8 +596,7 @@ public class NPCSimulatorService {
 
         NPC npc = npcOpt.get();
         updateSingleNPC(npc);
-        return String.format("已手动更新NPC: %s，当前动作: %s，位置: %s",
-                npc.getName(), npc.getCurrentAction(), npc.getCurrentLocation());
+        return String.format("已手动更新NPC: %s，当前动作: %s，位置: %s", npc.getName(), npc.getCurrentAction(), npc.getCurrentLocation());
     }
 
     /**
@@ -644,27 +605,13 @@ public class NPCSimulatorService {
     public Map<String, Object> getNPCStatistics() {
         List<NPC> allNPCs = npcRepository.findAll();
 
-        long activeNPCs = allNPCs.stream()
-                .filter(npc -> npc.getCurrentAction() != null && !npc.getCurrentAction().isEmpty())
-                .count();
+        long activeNPCs = allNPCs.stream().filter(npc -> npc.getCurrentAction() != null && !npc.getCurrentAction().isEmpty()).count();
 
-        double avgHappiness = allNPCs.stream()
-                .mapToInt(npc -> npc.getStats().getHappiness())
-                .average()
-                .orElse(0);
+        double avgHappiness = allNPCs.stream().mapToInt(npc -> npc.getStats().getHappiness()).average().orElse(0);
 
-        double avgEnergy = allNPCs.stream()
-                .mapToInt(npc -> npc.getStats().getEnergy())
-                .average()
-                .orElse(0);
+        double avgEnergy = allNPCs.stream().mapToInt(npc -> npc.getStats().getEnergy()).average().orElse(0);
 
-        return Map.of(
-                "totalNPCs", allNPCs.size(),
-                "activeNPCs", activeNPCs,
-                "avgHappiness", String.format("%.1f", avgHappiness),
-                "avgEnergy", String.format("%.1f", avgEnergy),
-                "timestamp", LocalDateTime.now()
-        );
+        return Map.of("totalNPCs", allNPCs.size(), "activeNPCs", activeNPCs, "avgHappiness", String.format("%.1f", avgHappiness), "avgEnergy", String.format("%.1f", avgEnergy), "timestamp", LocalDateTime.now());
     }
 
     /**

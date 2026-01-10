@@ -29,6 +29,7 @@ public class WorldState {
     public WorldState() {
         // 设置初始时间：2088年1月1日早上8点
         this.gameTime = LocalDateTime.of(2088, 1, 1, 8, 0);
+        //todo 未来增加随机能力
         this.weather = "SUNNY";  // 初始晴天
         this.paused = false;     // 初始未暂停
     }

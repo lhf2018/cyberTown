@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.util.CollectionUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -69,6 +70,7 @@ public class TownController {
         String message = request.get("message");
         NPC npc = getNPC(id);
 
+        //todo 待完善
         String response = aiService.generateDialogue(npc, message);
 
         return Map.of(
@@ -378,6 +380,7 @@ public class TownController {
             status.put("isHungry", npc.isHungry());
             status.put("isTired", npc.isTired());
             status.put("statusSummary", getStatusSummary(npc));
+            status.put("currentThought", CollectionUtils.isEmpty(npc.getCurrentThoughts()) ? null : npc.getCurrentThoughts().get(npc.getCurrentThoughts().size() - 1));
 
             npcStatusList.add(status);
         }

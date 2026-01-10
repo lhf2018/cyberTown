@@ -32,9 +32,5 @@ public class CyberTownApplication implements CommandLineRunner {
         npcSimulatorService.initializeNPCs();
 
         log.info("🏙️ 赛博小镇准备就绪！");
-        log.info("💡 你可以：");
-        log.info("   1. 查看所有NPC: GET http://localhost:8080/api/town/npcs");
-        log.info("   2. 与NPC对话: POST http://localhost:8080/api/town/npc/npc-1/talk");
-        log.info("   3. 查看H2数据库: http://localhost:8080/h2-console");
     }
 }

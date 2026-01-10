@@ -4,6 +4,8 @@ import lombok.Data;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * NPC实体 - 对应数据库中的npcs表
@@ -34,6 +36,8 @@ public class NPC {
     // 时间戳
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    private List<String> currentThoughts = new ArrayList<>();
 
     // 创建时自动设置时间
     @PrePersist
