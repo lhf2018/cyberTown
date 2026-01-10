@@ -3,248 +3,202 @@ package com.cybertown.graph;
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.world.WorldState;
 import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.service.AiServices;
+import dev.langchain4j.service.MemoryId;
+import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.time.LocalDateTime;
 
 /**
- * LangGraph4j NPC 行为决策图
+ * AI驱动的NPC行为决策图
+ * 真正利用大模型进行分析和决策
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class NPCBehaviorGraph {
 
-    // 工具接口定义
-    public interface DecisionAssistant {
-        NPCDecisionTools.BasicNeedsResult checkBasicNeeds(
-                String npcName, int energy, int hunger,
-                int happiness, int socialNeed
-        );
-
-        NPCDecisionTools.ScheduleResult checkSchedule(
-                String occupation, int hour, String timeOfDay
-        );
-
-        NPCDecisionTools.SocialResult checkSocial(
-                String personality, int socialNeed,
-                int happiness, String npcName
-        );
-
-        NPCDecisionTools.LocationResult checkLocation(
-                String location, String timeOfDay, String npcName
-        );
-
-        NPCDecisionTools.DecisionResult makeFinalDecision(
-                String npcName, String occupation, String personality,
-                String needsAnalysis, boolean hasUrgentNeed,
-                String scheduleSuggestion, boolean isWorkTime,
-                String socialSuggestion, String socialPriority,
-                String locationSuggestion, String locationType,
-                String currentTime
-        );
-    }
-
     private final NPCDecisionTools decisionTools;
-    private final ChatLanguageModel chatLanguageModel; // 可选
+    private final ChatLanguageModel chatLanguageModel;
 
-    // LangGraph4j 助手
-    private DecisionAssistant decisionAssistant;
+    private AIDecisionAssistant aiDecisionAssistant;
 
     /**
-     * 初始化 LangGraph4j
+     * 初始化AI决策助手
      */
+    @PostConstruct
     public void init() {
         try {
-            // 创建聊天记忆
-            ChatMemory chatMemory = MessageWindowChatMemory.withMaxMessages(10);
+            // 方法1：使用 ChatMemoryProvider
+            ChatMemoryProvider chatMemoryProvider = new ChatMemoryProvider() {
+                @Override
+                public ChatMemory get(Object memoryId) {
+                    // 为每个对话创建独立的记忆
+                    return MessageWindowChatMemory.withMaxMessages(10);
+                }
+            };
 
-            // 创建决策助手（LangGraph4j 自动代理）
-            this.decisionAssistant = AiServices.builder(DecisionAssistant.class)
-                    .chatLanguageModel(chatLanguageModel) // 可选的AI模型
-                    .chatMemory(chatMemory)
+            this.aiDecisionAssistant = AiServices.builder(AIDecisionAssistant.class)
+                    .chatLanguageModel(chatLanguageModel)
+                    .chatMemoryProvider(chatMemoryProvider)  // 使用 ChatMemoryProvider
                     .tools(decisionTools)
                     .build();
 
-            log.info("LangGraph4j 决策助手初始化成功");
+            log.info("🤖 AI决策助手初始化成功 - 使用大模型驱动决策");
+
         } catch (Exception e) {
-            log.error("LangGraph4j 初始化失败，将使用直接调用模式", e);
-            this.decisionAssistant = null;
+            log.error("AI决策助手初始化失败: {}", e.getMessage(), e);
+            this.aiDecisionAssistant = null;
         }
     }
 
     /**
-     * 主入口：执行决策流程
+     * AI驱动决策（主入口）
      */
-    public String decideNPCAction(NPC npc, WorldState world) {
-        log.info("🎯 LangGraph4j 决策开始: {}", npc.getName());
+    public String decideWithAI(NPC npc, WorldState world) {
+        log.info("🤖 AI决策开始: {}", npc.getName());
+
+        if (aiDecisionAssistant == null) {
+            log.warn("AI助手未启用，使用规则引擎决策");
+            return decideWithRules(npc, world);
+        }
 
         try {
             // 准备数据
             String npcName = npc.getName();
-            String occupation = npc.getOccupation();
-            String personality = npc.getPersonality();
-            String location = npc.getCurrentLocation();
+            String sessionId = "ai_" + npc.getId() + "_" + System.currentTimeMillis();
 
+            // 构建prompt参数
+            String request = String.format("""
+                npcName=%s
+                occupation=%s
+                personality=%s
+                location=%s
+                energy=%d
+                hunger=%d
+                happiness=%d
+                socialNeed=%d
+                hour=%d
+                timeOfDay=%s
+                currentTime=%s
+                """,
+                    npcName, npc.getOccupation(), npc.getPersonality(),
+                    npc.getCurrentLocation(),
+                    npc.getStats().getEnergy(), npc.getStats().getHunger(),
+                    npc.getStats().getHappiness(), npc.getStats().getSocialNeed(),
+                    world.getGameTime().getHour(), world.getTimeOfDay(),
+                    world.getGameTime().toString()
+            );
+
+            // 让AI分析并决策
+            String aiResponse = aiDecisionAssistant.analyzeAndDecide(sessionId, request);
+
+            // 解析AI响应，提取决策
+            String decision = extractDecisionFromAIResponse(aiResponse);
+
+            log.info("✅ AI决策完成: {} -> {}", npcName, decision);
+            log.debug("AI完整响应: {}", aiResponse);
+
+            return decision;
+
+        } catch (Exception e) {
+            log.error("❌ AI决策失败: {}", e.getMessage(), e);
+            return decideWithRules(npc, world);
+        }
+    }
+
+    /**
+     * 从AI响应中提取决策
+     */
+    private String extractDecisionFromAIResponse(String aiResponse) {
+        // 简单的提取逻辑，可以根据实际情况调整
+        if (aiResponse.contains("决策：")) {
+            return aiResponse.split("决策：")[1].split("\n")[0].trim();
+        } else if (aiResponse.contains("建议：")) {
+            return aiResponse.split("建议：")[1].split("\n")[0].trim();
+        } else if (aiResponse.contains("行动：")) {
+            return aiResponse.split("行动：")[1].split("\n")[0].trim();
+        }
+
+        // 默认返回第一行
+        return aiResponse.split("\n")[0].trim();
+    }
+
+    /**
+     * 规则引擎决策（备选方案）
+     */
+    public String decideWithRules(NPC npc, WorldState world) {
+        log.info("⚙️ 规则引擎决策: {}", npc.getName());
+
+        try {
+            // 使用原有的决策逻辑
+            String npcName = npc.getName();
             int energy = npc.getStats().getEnergy();
             int hunger = npc.getStats().getHunger();
             int happiness = npc.getStats().getHappiness();
             int socialNeed = npc.getStats().getSocialNeed();
 
             int hour = world.getGameTime().getHour();
-            String timeOfDay = world.getTimeOfDay();
-            String currentTime = world.getGameTime().toString();
+            String location = npc.getCurrentLocation();
 
-            List<String> decisionLog = new ArrayList<>();
-
-            // 1. 检查基础需求
-            log.debug("步骤1: 检查基础需求");
-            NPCDecisionTools.BasicNeedsResult needsResult;
-            if (decisionAssistant != null) {
-                needsResult = decisionAssistant.checkBasicNeeds(
-                        npcName, energy, hunger, happiness, socialNeed
-                );
-            } else {
-                needsResult = decisionTools.checkBasicNeeds(
-                        npcName, energy, hunger, happiness, socialNeed
-                );
+            // 简单的规则引擎
+            if (energy < 20) {
+                return "立即休息";
+            }
+            if (hunger > 85) {
+                return "立即吃饭";
+            }
+            if (energy < 40) {
+                return "考虑休息";
+            }
+            if (hunger > 65) {
+                return "去吃饭";
             }
 
-            decisionLog.add("需求分析: " + needsResult.getAnalysis());
-
-            // 紧急需求直接返回
-            if (needsResult.isHasUrgentNeed() && needsResult.getSuggestedAction() != null) {
-                log.info("⚠️ 检测到紧急需求: {}", needsResult.getSuggestedAction());
-                return needsResult.getSuggestedAction();
+            // 工作时间判断
+            boolean isWorkTime = isWorkTime(npc.getOccupation(), hour);
+            if (isWorkTime) {
+                return "继续工作";
             }
 
-            // 2. 检查日程
-            log.debug("步骤2: 检查日程");
-            NPCDecisionTools.ScheduleResult scheduleResult;
-            if (decisionAssistant != null) {
-                scheduleResult = decisionAssistant.checkSchedule(occupation, hour, timeOfDay);
-            } else {
-                scheduleResult = decisionTools.checkSchedule(occupation, hour, timeOfDay);
+            // 社交需求
+            if (socialNeed > 80) {
+                return "进行社交活动";
             }
 
-            decisionLog.add("日程建议: " + scheduleResult.getSuggestion());
-
-            // 3. 检查社交
-            log.debug("步骤3: 检查社交");
-            NPCDecisionTools.SocialResult socialResult;
-            if (decisionAssistant != null) {
-                socialResult = decisionAssistant.checkSocial(
-                        personality, socialNeed, happiness, npcName
-                );
-            } else {
-                socialResult = decisionTools.checkSocial(
-                        personality, socialNeed, happiness, npcName
-                );
+            // 根据位置选择
+            if (location.contains("酒吧") || location.contains("娱乐")) {
+                return "享受娱乐活动";
             }
 
-            decisionLog.add("社交建议: " + socialResult.getSuggestion());
-
-            // 4. 检查位置
-            log.debug("步骤4: 检查位置");
-            NPCDecisionTools.LocationResult locationResult;
-            if (decisionAssistant != null) {
-                locationResult = decisionAssistant.checkLocation(location, timeOfDay, npcName);
-            } else {
-                locationResult = decisionTools.checkLocation(location, timeOfDay, npcName);
+            if (happiness < 30) {
+                return "改善心情";
             }
 
-            decisionLog.add("位置建议: " + locationResult.getSuggestion());
-
-            // 5. 综合决策
-            log.debug("步骤5: 综合决策");
-            NPCDecisionTools.DecisionResult finalResult;
-            if (decisionAssistant != null) {
-                finalResult = decisionAssistant.makeFinalDecision(
-                        npcName, occupation, personality,
-                        needsResult.getAnalysis(), needsResult.isHasUrgentNeed(),
-                        scheduleResult.getSuggestion(), scheduleResult.isWorkTime(),
-                        socialResult.getSuggestion(), socialResult.getPriority(),
-                        locationResult.getSuggestion(), locationResult.getLocationType(),
-                        currentTime
-                );
-            } else {
-                finalResult = decisionTools.makeFinalDecision(
-                        npcName, occupation, personality,
-                        needsResult.getAnalysis(), needsResult.isHasUrgentNeed(),
-                        scheduleResult.getSuggestion(), scheduleResult.isWorkTime(),
-                        socialResult.getSuggestion(), socialResult.getPriority(),
-                        locationResult.getSuggestion(), locationResult.getLocationType(),
-                        currentTime
-                );
-            }
-
-            // 记录决策日志
-            logDecisionProcess(npcName, decisionLog, finalResult);
-
-            log.info("✅ LangGraph4j 决策完成: {} -> {} (置信度: {}%)",
-                    npcName, finalResult.getDecision(), finalResult.getConfidence());
-
-            return finalResult.getDecision();
+            return "日常活动";
 
         } catch (Exception e) {
-            log.error("❌ LangGraph4j 决策流程异常", e);
-            return generateFallbackDecision(npc, world);
+            log.error("规则引擎决策失败", e);
+            return "保持现状";
         }
     }
 
     /**
-     * 记录决策过程
+     * 判断是否是工作时间
      */
-    private void logDecisionProcess(String npcName, List<String> decisionLog,
-                                    NPCDecisionTools.DecisionResult finalResult) {
-        StringBuilder logMessage = new StringBuilder();
-        logMessage.append("\n=== LangGraph4j 决策报告 ===\n");
-        logMessage.append("NPC: ").append(npcName).append("\n");
-        logMessage.append("最终决策: ").append(finalResult.getDecision()).append("\n");
-        logMessage.append("决策理由: ").append(finalResult.getReason()).append("\n");
-        logMessage.append("置信度: ").append(finalResult.getConfidence()).append("%\n");
-        logMessage.append("决策流程:\n");
-
-        for (int i = 0; i < decisionLog.size(); i++) {
-            logMessage.append("  ").append(i + 1).append(". ").append(decisionLog.get(i)).append("\n");
-        }
-
-        log.debug(logMessage.toString());
-    }
-
-    /**
-     * 生成降级决策
-     */
-    private String generateFallbackDecision(NPC npc, WorldState world) {
-        // 简单的降级逻辑
-        if (npc.getStats().getEnergy() < 30) {
-            return "去休息";
-        }
-        if (npc.getStats().getHunger() > 70) {
-            return "去吃饭";
-        }
-
-        int hour = world.getGameTime().getHour();
-        if (hour >= 9 && hour < 18) {
-            return "工作";
-        } else {
-            return "休息或娱乐";
-        }
-    }
-
-    /**
-     * 获取决策助手状态
-     */
-    public String getAssistantStatus() {
-        if (decisionAssistant == null) {
-            return "LangGraph4j 助手未启用（使用直接工具调用）";
-        }
-        return "LangGraph4j 助手已启用";
+    private boolean isWorkTime(String occupation, int hour) {
+        return switch (occupation) {
+            case "程序员", "设计师", "医生", "警察" -> hour >= 9 && hour < 18;
+            case "酒吧老板" -> hour >= 16 || hour < 2;
+            default -> hour >= 9 && hour < 18;
+        };
     }
 }

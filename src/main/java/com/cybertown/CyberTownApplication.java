@@ -14,7 +14,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Slf4j
 @SpringBootApplication
-@EnableScheduling  // 启用定时任务，让NPC自动更新
+@EnableScheduling
 @RequiredArgsConstructor
 public class CyberTownApplication implements CommandLineRunner {
 

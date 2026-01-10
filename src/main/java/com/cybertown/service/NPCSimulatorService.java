@@ -4,6 +4,7 @@ import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.npc.NPCStats;
 import com.cybertown.repository.NPCRepository;
 import com.cybertown.domain.world.WorldState;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -38,7 +39,7 @@ public class NPCSimulatorService {
 
     // ======================== 决策概率配置 ========================
     private static final int DECISION_PROBABILITY = 30;        // 30%概率触发决策
-    private static final int MIN_DECISION_INTERVAL_MINUTES = 15; // 决策最小间隔15分钟
+    private static final int MIN_DECISION_INTERVAL_MINUTES = 1; // 决策最小间隔15分钟
 
     // ======================== 定时任务 ========================
 

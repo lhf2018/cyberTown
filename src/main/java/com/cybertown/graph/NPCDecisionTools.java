@@ -1,6 +1,7 @@
 package com.cybertown.graph;
 
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.service.V;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -13,18 +14,18 @@ import java.time.LocalDateTime;
  */
 @Slf4j
 @Component
-public class NPCDecisionTools {
+public class NPCDecisionTools implements DecisionAssistant {
 
     /**
      * 检查NPC基础需求 - 正确的参数定义
      */
     @Tool("检查NPC的基础生理需求：能量、饥饿、心情、社交需求等。返回值包含是否有紧急需求和建议行动。")
     public BasicNeedsResult checkBasicNeeds(
-            String npcName,
-            int energy,
-            int hunger,
-            int happiness,
-            int socialNeed
+            @V("NPC姓名") String npcName,
+            @V("能量值，范围0-100") int energy,
+            @V("饥饿度，范围0-100") int hunger,
+            @V("心情值，范围0-100") int happiness,
+            @V("社交需求，范围0-100") int socialNeed
     ) {
         log.debug("LangGraph工具调用: checkBasicNeeds for {}", npcName);
 
@@ -96,9 +97,9 @@ public class NPCDecisionTools {
      */
     @Tool("根据NPC的职业和当前时间检查日程安排，返回日程建议和是否工作时间")
     public ScheduleResult checkSchedule(
-            String occupation,
-            int hour,
-            String timeOfDay
+            @V("NPC的职业") String occupation,
+            @V("当前小时，0-23") int hour,
+            @V("时间段，如DAY/NIGHT") String timeOfDay
     ) {
         log.debug("LangGraph工具调用: checkSchedule for {} at {}:00", occupation, hour);
 
@@ -126,10 +127,10 @@ public class NPCDecisionTools {
      */
     @Tool("检查NPC的社交需求，考虑性格和当前心情")
     public SocialResult checkSocial(
-            String personality,
-            int socialNeed,
-            int happiness,
-            String npcName
+            @V("NPC的性格") String personality,
+            @V("社交需求值") int socialNeed,
+            @V("当前心情") int happiness,
+            @V("NPC姓名") String npcName
     ) {
         log.debug("LangGraph工具调用: checkSocial for {}", npcName);
 
@@ -192,9 +193,9 @@ public class NPCDecisionTools {
      */
     @Tool("检查当前位置的可用活动和环境因素")
     public LocationResult checkLocation(
-            String location,
-            String timeOfDay,
-            String npcName
+            @V("位置名称") String location,
+            @V("时间段") String timeOfDay,
+            @V("NPC姓名") String npcName
     ) {
         log.debug("LangGraph工具调用: checkLocation for {} at {}", npcName, location);
 
@@ -220,18 +221,18 @@ public class NPCDecisionTools {
      */
     @Tool("综合所有因素为NPC做出最终决策")
     public DecisionResult makeFinalDecision(
-            String npcName,
-            String occupation,
-            String personality,
-            String needsAnalysis,
-            boolean hasUrgentNeed,
-            String scheduleSuggestion,
-            boolean isWorkTime,
-            String socialSuggestion,
-            String socialPriority,
-            String locationSuggestion,
-            String locationType,
-            String currentTime
+            @V("NPC姓名") String npcName,
+            @V("NPC职业") String occupation,
+            @V("NPC性格") String personality,
+            @V("需求分析文本") String needsAnalysis,
+            @V("是否有紧急需求") boolean hasUrgentNeed,
+            @V("日程建议") String scheduleSuggestion,
+            @V("是否工作时间") boolean isWorkTime,
+            @V("社交建议") String socialSuggestion,
+            @V("社交优先级") String socialPriority,
+            @V("位置建议") String locationSuggestion,
+            @V("位置类型") String locationType,
+            @V("当前时间字符串") String currentTime
     ) {
         log.debug("LangGraph工具调用: makeFinalDecision for {}", npcName);
 
@@ -361,21 +362,21 @@ public class NPCDecisionTools {
                                         String locationSuggestion, String locationType,
                                         String currentTime) {
         return String.format("""
-            === 决策上下文 ===
-            NPC: %s (%s)
-            性格: %s
-            当前时间: %s
-            
-            分析结果:
-            1. 基础需求: %s
-               - 紧急需求: %s
-            2. 日程: %s
-               - 工作时间: %s
-            3. 社交: %s
-               - 优先级: %s
-            4. 位置: %s
-               - 类型: %s
-            """,
+                        === 决策上下文 ===
+                        NPC: %s (%s)
+                        性格: %s
+                        当前时间: %s
+                        
+                        分析结果:
+                        1. 基础需求: %s
+                           - 紧急需求: %s
+                        2. 日程: %s
+                           - 工作时间: %s
+                        3. 社交: %s
+                           - 优先级: %s
+                        4. 位置: %s
+                           - 类型: %s
+                        """,
                 npcName, occupation, personality, currentTime,
                 needsAnalysis, hasUrgentNeed ? "是" : "否",
                 scheduleSuggestion, isWorkTime ? "是" : "否",

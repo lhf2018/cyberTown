@@ -18,6 +18,6 @@ public class NPCDecisionService {
      * 使用 LangGraph4j 进行智能决策
      */
     public String makeDecisionWithLangGraph(NPC npc, WorldState world) {
-        return npcBehaviorGraph.decideNPCAction(npc, world);
+        return npcBehaviorGraph.decideWithAI(npc, world);
     }
 }

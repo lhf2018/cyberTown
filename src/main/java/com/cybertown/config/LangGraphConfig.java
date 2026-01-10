@@ -21,8 +21,6 @@ public class LangGraphConfig {
     @Value("${spring.ai.openai.base-url:https://api.deepseek.com}")
     private String openaiBaseUrl;
 
-    private final NPCBehaviorGraph npcBehaviorGraph;
-
     /**
      * 配置聊天语言模型（可选）
      */
@@ -51,16 +49,4 @@ public class LangGraphConfig {
         }
     }
 
-    /**
-     * 初始化LangGraph4j
-     */
-    @PostConstruct
-    public void initLangGraph() {
-        try {
-            npcBehaviorGraph.init();
-            log.info("LangGraph4j 初始化完成");
-        } catch (Exception e) {
-            log.error("LangGraph4j 初始化失败", e);
-        }
-    }
 }
