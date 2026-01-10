@@ -1,0 +1,51 @@
+# ========== Spring Boot应用配置 ==========
+spring:
+  application:
+    name: cyber-town  # 应用名称，用于日志和服务发现
+
+  # ========== AI配置（DeepSeek） ==========
+  ai:
+    openai:
+      # API密钥：从环境变量DEEPSEEK_API_KEY读取，如果不存在则使用默认值
+      api-key: ${DEEPSEEK_API_KEY:sk-your-key-here}
+      # DeepSeek API端点（兼容OpenAI格式）
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          model: deepseek-chat      # 使用的DeepSeek模型
+          temperature: 0.7          # 创造性程度（0-1，越高回答越随机）
+          max-tokens: 500           # 最大返回token数，控制回答长度
+
+  # ========== 数据库配置 ==========
+  datasource:
+    # H2内存数据库URL：jdbc:h2:mem:数据库名
+    url: jdbc:h2:mem:cybertown
+    driver-class-name: org.h2.Driver  # H2数据库驱动
+    username: sa                      # 默认用户名
+    password: ""                      # 空密码
+
+  # ========== JPA（Java持久化API）配置 ==========
+  jpa:
+    hibernate:
+      # 启动时自动创建/更新表结构
+      ddl-auto: create-drop  # create-drop：启动时创建表，关闭时删除（开发用）
+    show-sql: true           # 在控制台显示SQL语句，便于调试
+    properties:
+      hibernate:
+        format_sql: true     # 格式化SQL语句，便于阅读
+
+  # ========== H2数据库控制台配置 ==========
+  h2:
+    console:
+      enabled: true          # 启用H2 Web控制台
+      path: /h2-console     # 控制台访问路径
+
+# ========== 自定义游戏配置 ==========
+cybertown:
+  time-scale: 6.0  # 游戏时间流速：现实1秒 = 游戏6秒
+
+# ========== 日志配置 ==========
+logging:
+  level:
+    com.cybertown: DEBUG        # 自定义包的日志级别为DEBUG（最详细）
+    org.springframework.ai: INFO # Spring AI包的日志级别为INFO
