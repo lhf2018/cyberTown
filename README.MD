@@ -24,7 +24,7 @@
 
 - **JDK 17** 或更高版本
 - **Maven 3.6+**
-- **DeepSeek API Key**（在[DeepSeek官网](https://www.deepseek.com/)免费申请）
+- **LLM API Key**（可在[DeepSeek官网](https://www.deepseek.com/)申请购买，1元100万token）
 
 ### 步骤 1：获取代码
 
@@ -36,20 +36,7 @@ cd cyber-town
 
 ### 步骤 2：配置API密钥
 
-**方式一：环境变量（推荐）**
-
-```bash
-# Linux / macOS
-export DEEPSEEK_API_KEY=你的实际密钥
-
-# Windows (Command Prompt)
-set DEEPSEEK_API_KEY=你的实际密钥
-
-# Windows (PowerShell)
-$env:DEEPSEEK_API_KEY="你的实际密钥"
-```
-
-**方式二：修改配置文件**
+**修改配置文件**
 编辑 `src/main/resources/application.yml`，将 `sk-your-key-here` 替换为你的密钥。
 
 ### 步骤 3：启动项目
@@ -71,17 +58,11 @@ mvn clean spring-boot:run
 ...
 🏙️ 赛博小镇已就绪！
 ```
-
-同时，你可以在浏览器中访问以下地址：
-
-- **应用状态页**：`http://localhost:8080`
-- **H2数据库控制台**：`http://localhost:8080/h2-console` (用于开发调试)
-
 ---
 
 ## 📡 API 接口速查
 
-项目启动后，以下REST API接口立即可用：
+项目启动后，以下API接口立即可用：
 
 ### 🎭 NPC 相关接口
 
@@ -89,7 +70,7 @@ mvn clean spring-boot:run
 |:-------|:--------------------------|:----------------|:------------------------------------------------|
 | `GET`  | `/api/town/npcs`          | **获取所有NPC列表**   | `curl http://localhost:8080/api/town/npcs`      |
 | `GET`  | `/api/town/npc/{id}`      | **获取单个NPC详情**   | `curl http://localhost:8080/api/town/npc/npc-1` |
-| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**    | 见下方详细示例                                         |
+| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**    | 见下方详细示例（未完全实现）                                  |
 | `GET` | `/api/town/npcs/status/stream` | **实时获取所有NPC状态** | 见下方详细示例                                         |
 
 ### ⏱️ 时间控制接口
@@ -104,41 +85,6 @@ mvn clean spring-boot:run
 | 方法     | 端点                 | 说明                   |
 |:-------|:-------------------|:---------------------|
 | `GET`  | `/api/town/status` | 获取小镇运行**状态**         |
-| `POST` | `/api/town/init`   | **重新初始化**小镇（重置NPC数据） |
-
----
-
-## 💬 与NPC对话示例
-
-### 使用 `curl` 命令
-
-```bash
-curl -X POST "http://localhost:8080/api/town/npc/npc-1/talk" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "你好，杰克！今天代码写得顺利吗？"}'
-```
-
-### 预期响应示例
-
-```json
-{
-  "npc": "杰克",
-  "response": "别提了，今天公司的服务器又被黑客试探攻击了，防火墙日志看了一下午。（揉了揉太阳穴）这世道，写代码还得兼职网络安全。",
-  "mood": "😔"
-}
-```
-
-### 使用 Postman 或 Insomnia
-
-1. 选择 **POST** 方法
-2. URL: `http://localhost:8080/api/town/npc/npc-1/talk`
-3. Headers: 添加 `Content-Type: application/json`
-4. Body (raw JSON):
-   ```json
-   {
-     "message": "你的问题或对话内容"
-   }
-   ```
 
 ---
 
@@ -248,28 +194,6 @@ logging:
     org.hibernate.SQL: DEBUG # 查看所有执行的SQL语句
 ```
 
-### 常见问题排查 (FAQ)
-
-**Q: 启动时报错，提示依赖找不到或版本冲突？**
-A: 请确保网络可访问 `https://repo.spring.io/milestone`（Spring AI的仓库）。可以尝试：
-
-```bash
-mvn clean compile -U # -U 强制更新快照依赖
-```
-
-**Q: 调用对话API，NPC回复“（信号干扰...）”？**
-A: 这表示AI调用失败。请检查：
-
-1. `DEEPSEEK_API_KEY` 环境变量是否正确设置
-2. 网络是否能正常访问 `api.deepseek.com`
-3. 查看应用日志中是否有详细的异常堆栈
-
-**Q: NPC的状态不自动更新？**
-A: 检查控制台日志，确认 `TimeService` 和 `NPCSimulatorService` 的定时任务是否正常执行。可能是游戏时间被暂停了，调用
-`/api/town/time/resume` 接口恢复。
-
----
-
 ## 🚀 进阶开发与扩展
 
 ### 增加新的NPC
@@ -282,24 +206,6 @@ A: 检查控制台日志，确认 `TimeService` 和 `NPCSimulatorService` 的定
 2. 在 `getInitialLocation()` 方法中为相应职业配置新地点。
 3. NPC的AI决策会自动将新地点纳入考虑范围。
 
-### 扩展AI交互场景
-
-1. 在 `AIConfig.java` 中定义新的 `PromptTemplate`。
-2. 在 `AIService.java` 中创建新的方法使用该模板。
-3. 在 `TownController.java` 中暴露新的API端点。
-
----
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/awesome-feature`)
-3. 提交更改 (`git commit -am 'Add awesome feature'`)
-4. 推送到分支 (`git push origin feature/awesome-feature`)
-5. 创建 Pull Request
-
 ---
 
 ## 🙏 致谢
@@ -307,7 +213,6 @@ A: 检查控制台日志，确认 `TimeService` 和 `NPCSimulatorService` 的定
 - 感谢 [Spring AI](https://spring.io/projects/spring-ai) 项目提供了简洁强大的AI集成能力。
 - 感谢 [DeepSeek](https://www.deepseek.com/) 提供优质、高效的AI模型服务。
 - 感谢所有开源社区的建设者。
-
 ---
 
 **踏入霓虹闪烁的赛博街道，开始你的冒险吧！** ✨
