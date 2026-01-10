@@ -3,6 +3,7 @@ package com.cybertown.service;
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.npc.NPCStats;
 import com.cybertown.domain.world.WorldState;
+import com.cybertown.graph.NPCBehaviorGraph;
 import com.cybertown.graph.NPCDecisionTools;
 import com.cybertown.repository.NPCRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,9 +27,9 @@ public class NPCSimulatorService {
 
     // ======================== 依赖注入 ========================
     private final NPCRepository npcRepository;       // 数据访问
-    private final NPCDecisionService decisionService; // 决策服务（核心！）
     private final WorldState worldState;             // 游戏世界状态
     private final WorldService worldService;         // 世界信息服务
+    private final NPCBehaviorGraph npcBehaviorGraph;
 
     private final Random random = new Random();
 
@@ -127,7 +128,7 @@ public class NPCSimulatorService {
 
         // 3. 检查并执行决策
         if (shouldMakeDecision(npc)) {
-            NPCDecisionTools.DecisionResult decision = decisionService.makeDecisionWithLangGraph(npc, worldState);
+            NPCDecisionTools.DecisionResult decision = npcBehaviorGraph.decideWithAI(npc, worldState);
             apply(npc, decision);
             hasChanges = true;
 

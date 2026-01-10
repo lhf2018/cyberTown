@@ -29,8 +29,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @RequestMapping("/api/town")
 @RequiredArgsConstructor
 public class TownController {
-
-    // 注入服务
     private final NPCRepository npcRepository;
     private final AIService aiService;
     private final NPCSimulatorService npcSimulatorService;

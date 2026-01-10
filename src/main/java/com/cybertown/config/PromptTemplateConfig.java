@@ -1,6 +1,5 @@
 package com.cybertown.config;
 
-import org.springframework.ai.chat.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,16 +7,14 @@ import org.springframework.context.annotation.Configuration;
 /**
  * AI相关配置类
  *
- * @Configuration 表示这是一个配置类，定义Spring Bean
  */
 @Configuration
-public class AIConfig {
+public class PromptTemplateConfig {
 
     /**
      * NPC决策Prompt模板
      * PromptTemplate：Spring AI提供的提示词模板，支持变量替换
      *
-     * @Bean 表示这个方法返回的对象会被Spring管理
      */
     @Bean
     public PromptTemplate npcDecisionPrompt() {

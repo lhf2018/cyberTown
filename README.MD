@@ -85,11 +85,12 @@ mvn clean spring-boot:run
 
 ### 🎭 NPC 相关接口
 
-| 方法     | 端点                        | 说明            | 示例请求                                            |
-|:-------|:--------------------------|:--------------|:------------------------------------------------|
-| `GET`  | `/api/town/npcs`          | **获取所有NPC列表** | `curl http://localhost:8080/api/town/npcs`      |
-| `GET`  | `/api/town/npc/{id}`      | **获取单个NPC详情** | `curl http://localhost:8080/api/town/npc/npc-1` |
-| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**  | 见下方详细示例                                         |
+| 方法     | 端点                        | 说明              | 示例请求                                            |
+|:-------|:--------------------------|:----------------|:------------------------------------------------|
+| `GET`  | `/api/town/npcs`          | **获取所有NPC列表**   | `curl http://localhost:8080/api/town/npcs`      |
+| `GET`  | `/api/town/npc/{id}`      | **获取单个NPC详情**   | `curl http://localhost:8080/api/town/npc/npc-1` |
+| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**    | 见下方详细示例                                         |
+| `GET` | `/api/town/npcs/status/stream` | **实时获取所有NPC状态** | 见下方详细示例                                         |
 
 ### ⏱️ 时间控制接口
 
@@ -97,7 +98,6 @@ mvn clean spring-boot:run
 |:-------|:--------------------------------------|:------------|
 | `POST` | `/api/town/time/pause`                | **暂停**游戏时间  |
 | `POST` | `/api/town/time/resume`               | **恢复**游戏时间  |
-| `POST` | `/api/town/time/fast-forward/{hours}` | **快进**指定小时数 |
 
 ### 🛠️ 系统管理接口
 
@@ -290,12 +290,6 @@ A: 检查控制台日志，确认 `TimeService` 和 `NPCSimulatorService` 的定
 
 ---
 
-## 📄 许可证
-
-本项目采用 **MIT 许可证**。详情请见 [LICENSE](LICENSE) 文件。
-
----
-
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
@@ -318,6 +312,12 @@ A: 检查控制台日志，确认 `TimeService` 和 `NPCSimulatorService` 的定
 
 **踏入霓虹闪烁的赛博街道，开始你的冒险吧！** ✨
 
-> 如有问题，请查看日志或提交Issue。欢迎提出改进建议！\
-> todo 计划后面做的
-> 对话干预决策
+> 如有问题，请查看日志或提交Issue。欢迎提出改进建议！
+
+## 计划后面做的
+> 1. 对话干预决策
+> 2. 初始化更随机
+> 3. 世界信息服务
+> 4. web服务、最新新闻来影响决策
+> 5. 更多的事件、正向、负向或犯罪系统、随机天气等
+> 6. 前端页面
