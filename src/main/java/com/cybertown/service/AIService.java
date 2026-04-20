@@ -28,15 +28,7 @@ public class AIService {
      */
     public String generateDialogue(NPC npc, String playerMessage) {
         try {
-            Map<String, Object> params = Map.of(
-                    "name", npc.getName(),
-                    "occupation", npc.getOccupation(),
-                    "personality", npc.getPersonality(),
-                    "mood", getMoodDescription(npc.getStats().getHappiness()),
-                    "playerMessage", playerMessage
-            );
-
-            String prompt = npcDialoguePrompt.render(params);
+            String prompt = buildRichDialoguePrompt(npc, playerMessage);
             log.debug("调用AI生成对话：{}\nPrompt: {}", npc.getName(), prompt);
 
             String response = chatClient.call(prompt);
@@ -47,6 +39,89 @@ public class AIService {
             log.error("AI对话生成失败", e);
             return "（信号干扰...暂时无法回应）";
         }
+    }
+
+    private String buildRichDialoguePrompt(NPC npc, String playerMessage) {
+        String thoughts = "无";
+        if (npc.getCurrentThoughts() != null && !npc.getCurrentThoughts().isEmpty()) {
+            int start = Math.max(0, npc.getCurrentThoughts().size() - 3);
+            thoughts = String.join("；", npc.getCurrentThoughts().subList(start, npc.getCurrentThoughts().size()));
+        }
+
+        return """
+                你正在扮演赛博朋克世界里的NPC，请严格代入角色身份回复玩家。
+
+                【角色设定】
+                - 姓名：%s
+                - 职业：%s
+                - 性格：%s
+
+                【当前状态】
+                - 位置：%s
+                - 当前动作：%s
+                - 当前目标：%s
+                - 心情：%s
+                - 近期想法：%s
+
+                【数值状态】
+                - 能量：%d
+                - 饥饿：%d
+                - 快乐：%d
+                - 社交需求：%d
+                - 健康：%d
+
+                【长期属性】
+                - 现金：%.2f
+                - 储蓄：%.2f
+                - 负债：%.2f
+                - 技能：%d
+                - 知识：%d
+                - 智力：%d
+                - 魅力：%d
+                - 声望：%d
+                - 学历：%s
+                - 工作经验(月)：%d
+
+                玩家对你说：%s
+
+                【回复要求】
+                1) 用第一人称，保持该NPC的个性和职业语气。
+                2) 回复 1~3 句话，简短但有趣，带一点赛博朋克风格。
+                3) 必须体现当前状态和至少一个属性信息（如钱、负债、健康、技能等）。
+                4) 不要跳出角色，不要解释你是AI，不要写旁白标签。
+                """.formatted(
+                npc.getName(),
+                npc.getOccupation(),
+                npc.getPersonality(),
+                safeText(npc.getCurrentLocation()),
+                safeText(npc.getCurrentAction()),
+                safeText(npc.getCurrentGoal()),
+                getMoodDescription(npc.getStats().getHappiness()),
+                thoughts,
+                npc.getStats().getEnergy(),
+                npc.getStats().getHunger(),
+                npc.getStats().getHappiness(),
+                npc.getStats().getSocialNeed(),
+                npc.getStats().getHealth(),
+                npc.getStats().getMoney(),
+                npc.getStats().getSavings(),
+                npc.getStats().getDebt(),
+                npc.getStats().getSkillLevel(),
+                npc.getStats().getKnowledgeLevel(),
+                npc.getStats().getIntelligence(),
+                npc.getStats().getCharisma(),
+                npc.getStats().getReputation(),
+                safeText(npc.getStats().getEducationLevel()),
+                npc.getStats().getWorkExperience(),
+                safeText(playerMessage)
+        );
+    }
+
+    private String safeText(String value) {
+        if (value == null || value.isBlank()) {
+            return "暂无";
+        }
+        return value.trim();
     }
 
     // 根据快乐度返回心情描述
@@ -87,6 +162,14 @@ public class AIService {
                    - money: 金钱(0-10000)
                    - intelligence: 智力(0-100)
                    - charisma: 魅力(0-100)
+                   - skillLevel: 职业技能(0-100)
+                   - knowledgeLevel: 知识储备(0-100)
+                   - health: 健康水平(0-100)
+                   - reputation: 社会声望(0-100)
+                   - savings: 储蓄(>=0)
+                   - debt: 负债(>=0)
+                   - workExperience: 工作经验月数(>=0)
+                   - educationLevel: 学历(如高中/大专/本科/硕士/博士/职业认证)
                 3) 内容要贴合赛博朋克都市背景，字段都不能为空。
                 """.formatted(targetCount, existing);
 
@@ -132,6 +215,14 @@ public class AIService {
         double money = clamp(item.path("money").asDouble(1000), 0, 10000);
         int intelligence = clamp(item.path("intelligence").asInt(55), 0, 100);
         int charisma = clamp(item.path("charisma").asInt(50), 0, 100);
+        int skillLevel = clamp(item.path("skillLevel").asInt(45), 0, 100);
+        int knowledgeLevel = clamp(item.path("knowledgeLevel").asInt(50), 0, 100);
+        int health = clamp(item.path("health").asInt(75), 0, 100);
+        int reputation = clamp(item.path("reputation").asInt(30), 0, 100);
+        double savings = clamp(item.path("savings").asDouble(200), 0, 1_000_000);
+        double debt = clamp(item.path("debt").asDouble(0), 0, 1_000_000);
+        int workExperience = clamp(item.path("workExperience").asInt(0), 0, 600);
+        String educationLevel = sanitize(item.path("educationLevel").asText("高中"));
 
         if (name.isBlank() || occupation.isBlank() || personality.isBlank()) {
             return null;
@@ -141,7 +232,8 @@ public class AIService {
         if (currentAction.isBlank()) currentAction = "活动中";
         if (currentGoal.isBlank()) currentGoal = "适应城市节奏";
         return new NPCBlueprint(name, occupation, personality, location, currentAction, currentGoal,
-                energy, hunger, happiness, socialNeed, money, intelligence, charisma);
+                energy, hunger, happiness, socialNeed, money, intelligence, charisma,
+                skillLevel, knowledgeLevel, health, reputation, savings, debt, workExperience, educationLevel);
     }
 
     private String sanitize(String value) {
@@ -192,10 +284,22 @@ public class AIService {
                     20 + random.nextInt(61),
                     300 + random.nextInt(2701),
                     35 + random.nextInt(66),
-                    30 + random.nextInt(71)
+                    30 + random.nextInt(71),
+                    30 + random.nextInt(61),
+                    35 + random.nextInt(61),
+                    50 + random.nextInt(46),
+                    10 + random.nextInt(41),
+                    100 + random.nextInt(1501),
+                    random.nextInt(801),
+                    random.nextInt(120),
+                    randomPick("高中", "大专", "本科", "硕士", "职业认证")
             ));
         }
         return list;
+    }
+
+    private String randomPick(String... options) {
+        return options[ThreadLocalRandom.current().nextInt(options.length)];
     }
 
     private int clamp(int value, int min, int max) {
@@ -204,6 +308,146 @@ public class AIService {
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    /**
+     * 上帝指令：把自然语言转换为属性修改建议
+     */
+    public GodModification parseGodInstruction(NPC npc, String instruction) {
+        String prompt = """
+                你是游戏管理员助手。请根据管理员指令，输出针对单个NPC的属性修改JSON。
+                NPC当前信息：
+                - name: %s
+                - occupation: %s
+                - personality: %s
+                - location: %s
+                - action: %s
+                - goal: %s
+                - money: %.2f
+                - savings: %.2f
+                - debt: %.2f
+                - intelligence: %d
+                - charisma: %d
+                - skillLevel: %d
+                - knowledgeLevel: %d
+                - health: %d
+                - reputation: %d
+                - energy: %d
+                - hunger: %d
+                - happiness: %d
+                - socialNeed: %d
+                - educationLevel: %s
+                - workExperience: %d
+
+                管理员指令：%s
+
+                只输出JSON对象，不要任何解释。字段可选：
+                {
+                  "currentLocation": "string",
+                  "currentAction": "string",
+                  "currentGoal": "string",
+                  "educationLevel": "string",
+                  "money": number,
+                  "savings": number,
+                  "debt": number,
+                  "intelligence": number,
+                  "charisma": number,
+                  "skillLevel": number,
+                  "knowledgeLevel": number,
+                  "health": number,
+                  "reputation": number,
+                  "energy": number,
+                  "hunger": number,
+                  "happiness": number,
+                  "socialNeed": number,
+                  "workExperience": number
+                }
+                约束：0-100 的字段必须在范围内；money/savings/debt/workExperience >= 0。
+                """.formatted(
+                npc.getName(),
+                npc.getOccupation(),
+                npc.getPersonality(),
+                npc.getCurrentLocation(),
+                npc.getCurrentAction(),
+                npc.getCurrentGoal(),
+                npc.getStats().getMoney(),
+                npc.getStats().getSavings(),
+                npc.getStats().getDebt(),
+                npc.getStats().getIntelligence(),
+                npc.getStats().getCharisma(),
+                npc.getStats().getSkillLevel(),
+                npc.getStats().getKnowledgeLevel(),
+                npc.getStats().getHealth(),
+                npc.getStats().getReputation(),
+                npc.getStats().getEnergy(),
+                npc.getStats().getHunger(),
+                npc.getStats().getHappiness(),
+                npc.getStats().getSocialNeed(),
+                npc.getStats().getEducationLevel(),
+                npc.getStats().getWorkExperience(),
+                instruction == null ? "" : instruction.trim()
+        );
+
+        try {
+            String raw = chatClient.call(prompt);
+            String json = stripMarkdownFence(raw);
+            JsonNode node = objectMapper.readTree(json);
+            if (!node.isObject()) {
+                return GodModification.empty();
+            }
+            return GodModification.from(node);
+        } catch (Exception e) {
+            log.warn("上帝指令解析失败: {}", e.getMessage());
+            return GodModification.empty();
+        }
+    }
+
+    /**
+     * 上帝指令执行后的NPC反馈
+     */
+    public String generateGodReply(NPC npc, String instruction) {
+        try {
+            String prompt = """
+                    你是%s（%s），性格是：%s。
+                    现在“上帝”刚刚对你下达并生效了指令：%s
+
+                    你当前状态：
+                    - 位置：%s
+                    - 动作：%s
+                    - 目标：%s
+                    - 心情：%s
+                    - 金钱：%.2f
+                    - 储蓄：%.2f
+                    - 负债：%.2f
+                    - 学历：%s
+                    - 技能：%d
+                    - 知识：%d
+                    - 声望：%d
+
+                    请你用第一人称说1-2句话回应玩家，表达你对这次变化的感受和下一步打算。
+                    要求：中文、赛博朋克风格、自然口语、不要解释规则。
+                    """.formatted(
+                    npc.getName(),
+                    npc.getOccupation(),
+                    npc.getPersonality(),
+                    instruction == null ? "（无）" : instruction,
+                    npc.getCurrentLocation(),
+                    npc.getCurrentAction(),
+                    npc.getCurrentGoal(),
+                    getMoodDescription(npc.getStats().getHappiness()),
+                    npc.getStats().getMoney(),
+                    npc.getStats().getSavings(),
+                    npc.getStats().getDebt(),
+                    npc.getStats().getEducationLevel(),
+                    npc.getStats().getSkillLevel(),
+                    npc.getStats().getKnowledgeLevel(),
+                    npc.getStats().getReputation()
+            );
+            return chatClient.call(prompt).trim();
+        } catch (Exception e) {
+            log.warn("生成上帝反馈失败: {}", e.getMessage());
+            return "信号有点乱，但我能感觉到命运刚被你改写了。";
+        }
     }
 
     public record NPCBlueprint(
@@ -219,7 +463,81 @@ public class AIService {
             int socialNeed,
             double money,
             int intelligence,
-            int charisma
+            int charisma,
+            int skillLevel,
+            int knowledgeLevel,
+            int health,
+            int reputation,
+            double savings,
+            double debt,
+            int workExperience,
+            String educationLevel
     ) {
+    }
+
+    public record GodModification(
+            String currentLocation,
+            String currentAction,
+            String currentGoal,
+            String educationLevel,
+            Double money,
+            Double savings,
+            Double debt,
+            Integer intelligence,
+            Integer charisma,
+            Integer skillLevel,
+            Integer knowledgeLevel,
+            Integer health,
+            Integer reputation,
+            Integer energy,
+            Integer hunger,
+            Integer happiness,
+            Integer socialNeed,
+            Integer workExperience
+    ) {
+        public static GodModification empty() {
+            return new GodModification(null, null, null, null,
+                    null, null, null,
+                    null, null, null, null, null, null,
+                    null, null, null, null, null);
+        }
+
+        public static GodModification from(JsonNode node) {
+            return new GodModification(
+                    text(node, "currentLocation"),
+                    text(node, "currentAction"),
+                    text(node, "currentGoal"),
+                    text(node, "educationLevel"),
+                    number(node, "money"),
+                    number(node, "savings"),
+                    number(node, "debt"),
+                    integer(node, "intelligence"),
+                    integer(node, "charisma"),
+                    integer(node, "skillLevel"),
+                    integer(node, "knowledgeLevel"),
+                    integer(node, "health"),
+                    integer(node, "reputation"),
+                    integer(node, "energy"),
+                    integer(node, "hunger"),
+                    integer(node, "happiness"),
+                    integer(node, "socialNeed"),
+                    integer(node, "workExperience")
+            );
+        }
+
+        private static String text(JsonNode node, String field) {
+            JsonNode v = node.get(field);
+            return (v == null || v.isNull()) ? null : v.asText();
+        }
+
+        private static Double number(JsonNode node, String field) {
+            JsonNode v = node.get(field);
+            return (v == null || v.isNull()) ? null : v.asDouble();
+        }
+
+        private static Integer integer(JsonNode node, String field) {
+            JsonNode v = node.get(field);
+            return (v == null || v.isNull()) ? null : v.asInt();
+        }
     }
 }

@@ -34,6 +34,28 @@
             padding: 14px;
             margin-bottom: 14px;
         }
+        .broadcast-panel {
+            border: 1px solid #33507a;
+            background: linear-gradient(120deg, #18253d, #101a2d);
+            box-shadow: inset 0 0 40px rgba(79, 134, 255, 0.08);
+        }
+        .broadcast-title {
+            font-size: 14px;
+            color: #8fb4ff;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        .broadcast-message {
+            font-size: 20px;
+            line-height: 1.5;
+            font-weight: 700;
+            min-height: 64px;
+        }
+        .broadcast-time {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 12px;
+        }
         .top {
             display: flex;
             justify-content: space-between;
@@ -107,10 +129,30 @@
             height: 100%;
             background: linear-gradient(90deg, #22d3ee, #4f86ff);
         }
+        .small-input {
+            width: 100%;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 6px 8px;
+            background: #0a1020;
+            color: var(--text);
+            margin-top: 6px;
+        }
+        .tiny-btn {
+            margin-top: 6px;
+            padding: 6px 8px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
 <div class="wrap">
+    <div class="panel broadcast-panel">
+        <div class="broadcast-title">世界广播</div>
+        <div class="broadcast-message" id="worldBroadcast">正在接收世界事件...</div>
+        <div class="broadcast-time" id="worldBroadcastTime"></div>
+    </div>
+
     <div class="panel">
         <div class="top">
             <h1>赛博小镇运行面板</h1>
@@ -122,6 +164,24 @@
             <button id="endSimBtn">结束模拟并返回初始化</button>
         </div>
         <div class="row status" id="opStatus"></div>
+    </div>
+
+    <div class="panel">
+        <div class="top">
+            <h1 style="font-size:20px;">上帝模式</h1>
+            <div class="status">用自然语言直接修改某个NPC属性</div>
+        </div>
+        <div class="row">
+            <label>NPC
+                <select id="godNpcSelect" class="small-input" style="min-width:200px;"></select>
+            </label>
+        </div>
+        <textarea id="godInstruction" class="small-input" rows="3" placeholder="例如：把这个NPC的金钱改成20000，负债清零，目标改成三个月内买房，技能提升到85"></textarea>
+        <div class="row">
+            <button id="godApplyBtn">执行上帝指令</button>
+            <span class="status" id="godStatus"></span>
+        </div>
+        <div class="line" id="godNpcReply"></div>
     </div>
 
     <div class="panel">
@@ -154,6 +214,12 @@
     const mTired = document.getElementById("mTired");
     const mHappy = document.getElementById("mHappy");
     const mUpdated = document.getElementById("mUpdated");
+    const worldBroadcast = document.getElementById("worldBroadcast");
+    const worldBroadcastTime = document.getElementById("worldBroadcastTime");
+    const godNpcSelect = document.getElementById("godNpcSelect");
+    const godInstruction = document.getElementById("godInstruction");
+    const godStatus = document.getElementById("godStatus");
+    const godNpcReply = document.getElementById("godNpcReply");
 
     let source = null;
 
@@ -180,21 +246,65 @@
             const hunger = Number(n.hunger ?? n.stats?.hunger ?? 0);
             const happiness = Number(n.happiness ?? n.stats?.happiness ?? 0);
             const socialNeed = Number(n.socialNeed ?? n.stats?.socialNeed ?? 0);
+            const mood = n.mood ?? getMoodText(happiness);
+            const statusSummary = n.statusSummary ?? getStatusSummary({ energy, hunger, happiness, socialNeed });
+            const goal = n.currentGoal ?? n.goal ?? "-";
+            const money = Number(n.money ?? n.stats?.money ?? 0);
+            const savings = Number(n.savings ?? n.stats?.savings ?? 0);
+            const debt = Number(n.debt ?? n.stats?.debt ?? 0);
+            const educationLevel = n.educationLevel ?? n.stats?.educationLevel ?? "-";
+            const workExperience = Number(n.workExperience ?? n.stats?.workExperience ?? 0);
+            const skillLevel = Number(n.skillLevel ?? n.stats?.skillLevel ?? 0);
+            const knowledgeLevel = Number(n.knowledgeLevel ?? n.stats?.knowledgeLevel ?? 0);
+            const reputation = Number(n.reputation ?? n.stats?.reputation ?? 0);
+            const health = Number(n.health ?? n.stats?.health ?? 0);
             return `
                 <div class="card">
                     <div class="name">${n.name || "未知"} · ${n.occupation || "-"}</div>
                     <div class="line">位置：${n.location || n.currentLocation || "-"}</div>
                     <div class="line">动作：${n.action || n.currentAction || "-"}</div>
-                    <div class="line">目标：${n.currentGoal || "-"}</div>
-                    <div class="line">状态：${n.statusSummary || "-"}</div>
-                    <div class="line">心情：${n.mood || "-"}</div>
+                    <div class="line">目标：${goal}</div>
+                    <div class="line">状态：${statusSummary}</div>
+                    <div class="line">心情：${mood}</div>
+                    <div class="line">现金：${money.toFixed(0)} | 储蓄：${savings.toFixed(0)} | 负债：${debt.toFixed(0)}</div>
+                    <div class="line">学历：${educationLevel} | 经验(月)：${workExperience}</div>
+                    <div class="line">技能：${skillLevel} | 知识：${knowledgeLevel} | 声望：${reputation} | 健康：${health}</div>
                     <div class="line">能量 ${energy}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, energy))}%"></span></div>
                     <div class="line">饥饿 ${hunger}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, hunger))}%"></span></div>
                     <div class="line">快乐 ${happiness}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, happiness))}%"></span></div>
                     <div class="line">社交需求 ${socialNeed}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, socialNeed))}%"></span></div>
+                    <input id="talk-input-${n.id}" class="small-input" placeholder="和 ${n.name || "NPC"} 说点什么..." />
+                    <button class="tiny-btn" onclick="talkToNpc('${n.id}')">发送对话</button>
+                    <div class="line" id="talk-reply-${n.id}"></div>
                 </div>
             `;
         }).join("");
+        syncGodNpcOptions(npcs);
+    }
+
+    function getMoodText(happiness) {
+        if (happiness > 80) return "高兴";
+        if (happiness > 60) return "还行";
+        if (happiness > 40) return "一般";
+        if (happiness > 20) return "沮丧";
+        return "痛苦";
+    }
+
+    function getStatusSummary(stats) {
+        const tags = [];
+        if (stats.hunger > 70) tags.push("饥饿");
+        if (stats.energy < 30) tags.push("疲劳");
+        if (stats.happiness < 30) tags.push("低落");
+        if (stats.socialNeed > 70) tags.push("需社交");
+        return tags.length ? tags.join("、") : "正常";
+    }
+
+    function syncGodNpcOptions(npcs) {
+        const currentValue = godNpcSelect.value;
+        godNpcSelect.innerHTML = npcs.map((n) => `<option value="${n.id}">${n.name} (${n.occupation || "-"})</option>`).join("");
+        if (currentValue) {
+            godNpcSelect.value = currentValue;
+        }
     }
 
     async function refreshSummary() {
@@ -249,6 +359,70 @@
         };
     }
 
+    async function refreshWorldBroadcast() {
+        try {
+            const resp = await fetch("/api/town/world/broadcast");
+            if (!resp.ok) {
+                return;
+            }
+            const data = await resp.json();
+            worldBroadcast.textContent = data.message || "暂无新的世界广播";
+            worldBroadcastTime.textContent = "更新时间: " + new Date(data.timestamp || Date.now()).toLocaleTimeString();
+        } catch (_) {
+        }
+    }
+
+    async function talkToNpc(id) {
+        const input = document.getElementById(`talk-input-${id}`);
+        const reply = document.getElementById(`talk-reply-${id}`);
+        const message = input?.value?.trim();
+        if (!message) {
+            if (reply) reply.textContent = "请输入对话内容";
+            return;
+        }
+        try {
+            const resp = await fetch(`/api/town/npc/${id}/talk`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message })
+            });
+            if (!resp.ok) throw new Error("对话失败");
+            const data = await resp.json();
+            if (reply) reply.textContent = `${data.npc}: ${data.response}`;
+            input.value = "";
+        } catch (e) {
+            if (reply) reply.textContent = e.message;
+        }
+    }
+
+    async function applyGodCommand() {
+        const id = godNpcSelect.value;
+        const instruction = godInstruction.value.trim();
+        if (!id || !instruction) {
+            godStatus.textContent = "请选择NPC并输入指令";
+            return;
+        }
+        godStatus.textContent = "上帝指令执行中...";
+        godNpcReply.textContent = "";
+        try {
+            const resp = await fetch(`/api/town/npc/${id}/god-command`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ instruction })
+            });
+            if (!resp.ok) throw new Error("上帝指令执行失败");
+            const data = await resp.json();
+            godStatus.textContent = data.message || "执行成功";
+            if (data.npcReply) {
+                godNpcReply.textContent = `${data.npcName || "NPC"}：${data.npcReply}`;
+            }
+            godInstruction.value = "";
+            await refreshSummary();
+        } catch (e) {
+            godStatus.textContent = e.message;
+        }
+    }
+
     async function runBroadcast() {
         setOpStatus("正在手动广播...");
         try {
@@ -275,14 +449,18 @@
     document.getElementById("broadcastBtn").addEventListener("click", runBroadcast);
     document.getElementById("reloadBtn").addEventListener("click", () => refreshSummary().catch(err => setOpStatus(err.message, true)));
     document.getElementById("endSimBtn").addEventListener("click", endSimulationAndBack);
+    document.getElementById("godApplyBtn").addEventListener("click", applyGodCommand);
+    window.talkToNpc = talkToNpc;
 
     refreshSummary().catch(err => setOpStatus(err.message, true));
+    refreshWorldBroadcast();
     connectSSE();
     setInterval(() => {
         if (connectionStatus.textContent.includes("轮询")) {
             refreshSummary().catch(() => {});
         }
     }, 5000);
+    setInterval(refreshWorldBroadcast, 8000);
 </script>
 </body>
 </html>

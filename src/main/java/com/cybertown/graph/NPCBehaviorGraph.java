@@ -86,6 +86,15 @@ public class NPCBehaviorGraph {
                             hunger=%d
                             happiness=%d
                             socialNeed=%d
+                            money=%.2f
+                            savings=%.2f
+                            debt=%.2f
+                            skillLevel=%d
+                            knowledgeLevel=%d
+                            health=%d
+                            reputation=%d
+                            educationLevel=%s
+                            workExperience=%d
                             recentThoughts=%s
                             hour=%d
                             timeOfDay=%s
@@ -99,6 +108,15 @@ public class NPCBehaviorGraph {
                     npc.getStats().getHunger(),
                     npc.getStats().getHappiness(),
                     npc.getStats().getSocialNeed(),
+                    npc.getStats().getMoney(),
+                    npc.getStats().getSavings(),
+                    npc.getStats().getDebt(),
+                    npc.getStats().getSkillLevel(),
+                    npc.getStats().getKnowledgeLevel(),
+                    npc.getStats().getHealth(),
+                    npc.getStats().getReputation(),
+                    npc.getStats().getEducationLevel(),
+                    npc.getStats().getWorkExperience(),
                     recentThoughts,
                     world.getGameTime().getHour(),
                     world.getTimeOfDay(),

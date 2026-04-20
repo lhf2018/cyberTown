@@ -1,6 +1,7 @@
 package com.cybertown.controller;
 
 import com.cybertown.domain.npc.NPC;
+import com.cybertown.domain.npc.NPCStats;
 import com.cybertown.repository.NPCRepository;
 import com.cybertown.service.AIService;
 import com.cybertown.service.NPCSimulatorService;
@@ -75,6 +76,28 @@ public class TownController {
                 "npc", npc.getName(),
                 "response", response,
                 "mood", getMoodEmoji(npc.getStats().getHappiness())
+        );
+    }
+
+    /**
+     * 上帝模式：通过自然语言修改NPC属性
+     */
+    @PostMapping("/npc/{id}/god-command")
+    public Map<String, Object> godCommand(@PathVariable String id, @RequestBody Map<String, String> request) {
+        NPC npc = getNPC(id);
+        String instruction = request == null ? null : request.get("instruction");
+        AIService.GodModification mod = aiService.parseGodInstruction(npc, instruction);
+
+        applyGodModification(npc, mod);
+        NPC saved = npcRepository.save(npc);
+        String npcReply = aiService.generateGodReply(saved, instruction);
+
+        return Map.of(
+                "message", "上帝指令执行完成",
+                "npcId", saved.getId(),
+                "npcName", saved.getName(),
+                "npcReply", npcReply,
+                "npc", saved
         );
     }
 
@@ -248,6 +271,33 @@ public class TownController {
     }
 
     /**
+     * 世界广播（纯展示，不影响数值）
+     */
+    @GetMapping("/world/broadcast")
+    public Map<String, Object> getWorldBroadcast() {
+        List<NPC> npcs = npcRepository.findAll();
+        String[] globalEvents = {
+                "霓虹主干道出现临时集市，夜间人流激增。",
+                "企业区发布义体打折广告，预约排队中。",
+                "地下频道流传一条未知黑客宣言，引发热议。",
+                "中央公园开启全息灯光秀，市民停留时间增加。",
+                "仿生餐厅推出新菜单，外卖订单上涨。",
+                "警方宣布今晚加大巡逻，但暂无新增冲突。"
+        };
+
+        String message = globalEvents[new Random().nextInt(globalEvents.length)];
+        if (!npcs.isEmpty()) {
+            NPC randomNpc = npcs.get(new Random().nextInt(npcs.size()));
+            message = message + " 目击者称 " + randomNpc.getName() + " 正在 " + randomNpc.getCurrentLocation() + " 活动。";
+        }
+
+        return Map.of(
+                "message", message,
+                "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
+    /**
      * 10. 获取单个NPC的详细状态
      */
     @GetMapping("/npc/{id}/status/detail")
@@ -409,12 +459,22 @@ public class TownController {
             status.put("occupation", npc.getOccupation());
             status.put("location", npc.getCurrentLocation());
             status.put("action", npc.getCurrentAction());
+            status.put("currentGoal", npc.getCurrentGoal());
 
             // 基础状态值
             status.put("energy", npc.getStats().getEnergy());
             status.put("hunger", npc.getStats().getHunger());
             status.put("happiness", npc.getStats().getHappiness());
             status.put("socialNeed", npc.getStats().getSocialNeed());
+            status.put("money", npc.getStats().getMoney());
+            status.put("savings", npc.getStats().getSavings());
+            status.put("debt", npc.getStats().getDebt());
+            status.put("skillLevel", npc.getStats().getSkillLevel());
+            status.put("knowledgeLevel", npc.getStats().getKnowledgeLevel());
+            status.put("health", npc.getStats().getHealth());
+            status.put("reputation", npc.getStats().getReputation());
+            status.put("educationLevel", npc.getStats().getEducationLevel());
+            status.put("workExperience", npc.getStats().getWorkExperience());
 
             // 状态表情
             status.put("mood", getMoodEmoji(npc.getStats().getHappiness()));
@@ -484,5 +544,36 @@ public class TownController {
         }
 
         return String.join("、", statuses);
+    }
+
+    private void applyGodModification(NPC npc, AIService.GodModification mod) {
+        if (mod == null) {
+            return;
+        }
+        NPCStats s = npc.getStats();
+        if (mod.currentLocation() != null && !mod.currentLocation().isBlank()) npc.setCurrentLocation(mod.currentLocation().trim());
+        if (mod.currentAction() != null && !mod.currentAction().isBlank()) npc.setCurrentAction(mod.currentAction().trim());
+        if (mod.currentGoal() != null && !mod.currentGoal().isBlank()) npc.setCurrentGoal(mod.currentGoal().trim());
+        if (mod.educationLevel() != null && !mod.educationLevel().isBlank()) s.setEducationLevel(mod.educationLevel().trim());
+
+        if (mod.money() != null) s.setMoney(Math.max(0, mod.money()));
+        if (mod.savings() != null) s.setSavings(Math.max(0, mod.savings()));
+        if (mod.debt() != null) s.setDebt(Math.max(0, mod.debt()));
+        if (mod.workExperience() != null) s.setWorkExperience(Math.max(0, mod.workExperience()));
+
+        if (mod.intelligence() != null) s.setIntelligence(clamp(mod.intelligence(), 0, 100));
+        if (mod.charisma() != null) s.setCharisma(clamp(mod.charisma(), 0, 100));
+        if (mod.skillLevel() != null) s.setSkillLevel(clamp(mod.skillLevel(), 0, 100));
+        if (mod.knowledgeLevel() != null) s.setKnowledgeLevel(clamp(mod.knowledgeLevel(), 0, 100));
+        if (mod.health() != null) s.setHealth(clamp(mod.health(), 0, 100));
+        if (mod.reputation() != null) s.setReputation(clamp(mod.reputation(), 0, 100));
+        if (mod.energy() != null) s.setEnergy(clamp(mod.energy(), 0, 100));
+        if (mod.hunger() != null) s.setHunger(clamp(mod.hunger(), 0, 100));
+        if (mod.happiness() != null) s.setHappiness(clamp(mod.happiness(), 0, 100));
+        if (mod.socialNeed() != null) s.setSocialNeed(clamp(mod.socialNeed(), 0, 100));
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

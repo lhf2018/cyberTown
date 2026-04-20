@@ -203,6 +203,31 @@ public class NPCSimulatorService {
             changed = true;
         }
 
+        // 长期发展：工作会累计经验/技能/知识；资产会自然变化
+        if (isWorkingAction(npc.getCurrentAction()) && random.nextInt(100) < 35) {
+            stats.setWorkExperience(stats.getWorkExperience() + 1);
+            stats.setSkillLevel(Math.min(100, stats.getSkillLevel() + 1));
+            if (random.nextInt(100) < 40) {
+                stats.setKnowledgeLevel(Math.min(100, stats.getKnowledgeLevel() + 1));
+            }
+            changed = true;
+        }
+        if (stats.getDebt() > 0) {
+            stats.setDebt(stats.getDebt() * 1.001);
+            changed = true;
+        }
+        if (stats.getSavings() > 0 && random.nextInt(100) < 20) {
+            stats.setSavings(stats.getSavings() * 1.0005);
+            changed = true;
+        }
+        if (stats.getDebt() > stats.getMoney() * 2 && stats.getHappiness() > 0) {
+            stats.setHappiness(Math.max(0, stats.getHappiness() - 1));
+            changed = true;
+        } else if (stats.getSavings() > 3000 && stats.getHappiness() < 100 && random.nextInt(100) < 20) {
+            stats.setHappiness(Math.min(100, stats.getHappiness() + 1));
+            changed = true;
+        }
+
         return changed;
     }
 
@@ -228,14 +253,22 @@ public class NPCSimulatorService {
      * 判断是否需要做新决策
      */
     private boolean shouldMakeDecision(NPC npc) {
+        NPCStats stats = npc.getStats();
         // 1. 有紧急需求（100%触发决策）
         if (hasUrgentNeed(npc)) {
             log.debug("NPC {} 有紧急需求，触发决策", npc.getName());
             return true;
         }
 
-        // 2. 随机概率
-        boolean randomDecision = random.nextInt(100) < DECISION_PROBABILITY;
+        // 2. 动态概率：属性越极端，越倾向重新决策
+        int dynamicProbability = DECISION_PROBABILITY;
+        if (stats.getDebt() > 3000) dynamicProbability += 15;
+        if (stats.getMoney() < 300) dynamicProbability += 15;
+        if (stats.getHealth() < 40) dynamicProbability += 20;
+        if (stats.getKnowledgeLevel() > 75 && stats.getSkillLevel() > 75) dynamicProbability -= 10;
+        dynamicProbability = Math.max(20, Math.min(95, dynamicProbability));
+
+        boolean randomDecision = random.nextInt(100) < dynamicProbability;
         if (randomDecision) {
             log.trace("NPC {} 随机触发决策", npc.getName());
             return true;
@@ -308,12 +341,13 @@ public class NPCSimulatorService {
         // 工作消耗能量但赚钱
         if (lowerDecision.matches(".*(工作|编程|代码|办公|执勤|巡逻).*")) {
             stats.setEnergy(Math.max(0, stats.getEnergy() - 10));
-            // 20%概率赚钱
+            double earned = 30 + random.nextInt(90) + (stats.getSkillLevel() * 0.8) + (stats.getWorkExperience() * 0.5);
+            stats.setMoney(stats.getMoney() + earned);
+            stats.setSavings(stats.getSavings() + earned * 0.25);
             if (random.nextInt(100) < 20) {
-                double earned = 50 + random.nextInt(150); // 50-200信用点
-                stats.setMoney(stats.getMoney() + earned);
-                log.trace("NPC {} 工作赚取 {} 信用点", npc.getName(), earned);
+                stats.setReputation(Math.min(100, stats.getReputation() + 1));
             }
+            log.trace("NPC {} 工作赚取 {} 信用点", npc.getName(), earned);
         }
 
         // 休息恢复能量
@@ -327,6 +361,36 @@ public class NPCSimulatorService {
             // 花钱吃饭
             double cost = 30 + random.nextInt(70); // 30-100信用点
             stats.setMoney(Math.max(0, stats.getMoney() - cost));
+        }
+
+        // 学习投资：短期花钱，长期提升能力
+        if (lowerDecision.matches(".*(学习|上课|研究|培训|读书).*")) {
+            double tuition = 40 + random.nextInt(120);
+            if (stats.getMoney() >= tuition) {
+                stats.setMoney(stats.getMoney() - tuition);
+            } else {
+                stats.setDebt(stats.getDebt() + tuition);
+            }
+            stats.setKnowledgeLevel(Math.min(100, stats.getKnowledgeLevel() + 2));
+            stats.setSkillLevel(Math.min(100, stats.getSkillLevel() + 1));
+            maybePromoteEducation(stats);
+        }
+
+        // 投资理财：有波动，不直接影响世界事件
+        if (lowerDecision.matches(".*(投资|理财|交易|炒股).*")) {
+            double stake = Math.min(stats.getMoney() * 0.2, 300 + random.nextInt(400));
+            if (stake > 0) {
+                stats.setMoney(stats.getMoney() - stake);
+                double ratio = (random.nextDouble() * 0.6) - 0.2; // -20% ~ +40%
+                double result = stake * (1 + ratio);
+                stats.setMoney(stats.getMoney() + Math.max(0, result));
+                if (result >= stake) {
+                    stats.setSavings(stats.getSavings() + (result - stake));
+                    stats.setHappiness(Math.min(100, stats.getHappiness() + 2));
+                } else {
+                    stats.setHappiness(Math.max(0, stats.getHappiness() - 2));
+                }
+            }
         }
 
         // 社交提升心情但消耗能量
@@ -399,7 +463,9 @@ public class NPCSimulatorService {
         return stats.getEnergy() < 20 ||      // 能量极低
                 stats.getHunger() > 85 ||       // 非常饥饿
                 stats.getHappiness() < 15 ||    // 心情极差
-                stats.getSocialNeed() > 90;     // 极度需要社交
+                stats.getSocialNeed() > 90 ||   // 极度需要社交
+                stats.getMoney() < 50 ||        // 现金见底
+                stats.getDebt() > 5000;         // 负债过高
     }
 
     /**
@@ -479,6 +545,23 @@ public class NPCSimulatorService {
     private void assignLongTermGoal(NPC npc) {
         String occupation = npc.getOccupation();
         String personality = npc.getPersonality();
+        NPCStats stats = npc.getStats();
+
+        if (stats.getDebt() > 3000) {
+            npc.setCurrentGoal("优先偿还债务并稳定现金流");
+            log.info("为NPC {} 设定长期目标: {}", npc.getName(), npc.getCurrentGoal());
+            return;
+        }
+        if (stats.getMoney() < 300) {
+            npc.setCurrentGoal("寻找高收入机会并积累第一桶金");
+            log.info("为NPC {} 设定长期目标: {}", npc.getName(), npc.getCurrentGoal());
+            return;
+        }
+        if (stats.getKnowledgeLevel() < 45 || stats.getSkillLevel() < 45) {
+            npc.setCurrentGoal("参加培训提升技能与知识储备");
+            log.info("为NPC {} 设定长期目标: {}", npc.getName(), npc.getCurrentGoal());
+            return;
+        }
 
         String goal = switch (occupation) {
             case "程序员" -> personality.contains("内向") ? "独立完成一个开源项目" : "与团队合作开发新产品";
@@ -492,6 +575,34 @@ public class NPCSimulatorService {
 
         npc.setCurrentGoal(goal);
         log.info("为NPC {} 设定长期目标: {}", npc.getName(), goal);
+    }
+
+    private boolean isWorkingAction(String action) {
+        if (action == null) {
+            return false;
+        }
+        String lowerAction = action.toLowerCase();
+        return lowerAction.matches(".*(工作|编程|执勤|巡逻|办公|接单|营业|交易).*");
+    }
+
+    private void maybePromoteEducation(NPCStats stats) {
+        int knowledge = stats.getKnowledgeLevel();
+        String current = stats.getEducationLevel() == null ? "高中" : stats.getEducationLevel();
+        if (knowledge > 85 && !"博士".equals(current) && random.nextInt(100) < 20) {
+            stats.setEducationLevel("博士");
+            return;
+        }
+        if (knowledge > 75 && !current.matches("博士|硕士") && random.nextInt(100) < 25) {
+            stats.setEducationLevel("硕士");
+            return;
+        }
+        if (knowledge > 60 && !current.matches("博士|硕士|本科") && random.nextInt(100) < 35) {
+            stats.setEducationLevel("本科");
+            return;
+        }
+        if (knowledge > 45 && "高中".equals(current) && random.nextInt(100) < 30) {
+            stats.setEducationLevel("大专");
+        }
     }
 
     /**
@@ -568,6 +679,14 @@ public class NPCSimulatorService {
                 .happiness(50 + random.nextInt(40))       // 50-90
                 .socialNeed(30 + random.nextInt(40))      // 30-70
                 .money(500 + random.nextInt(1500))        // 500-2000
+                .skillLevel(30 + random.nextInt(40))
+                .knowledgeLevel(35 + random.nextInt(45))
+                .health(60 + random.nextInt(35))
+                .reputation(10 + random.nextInt(30))
+                .savings(100 + random.nextInt(600))
+                .debt(random.nextInt(300))
+                .workExperience(random.nextInt(60))
+                .educationLevel(randomPick("高中", "大专", "本科", "职业认证"))
                 .build();
         npc.setStats(stats);
 
@@ -593,6 +712,14 @@ public class NPCSimulatorService {
                 .money(blueprint.money())
                 .intelligence(blueprint.intelligence())
                 .charisma(blueprint.charisma())
+                .skillLevel(blueprint.skillLevel())
+                .knowledgeLevel(blueprint.knowledgeLevel())
+                .health(blueprint.health())
+                .reputation(blueprint.reputation())
+                .savings(blueprint.savings())
+                .debt(blueprint.debt())
+                .workExperience(blueprint.workExperience())
+                .educationLevel(blueprint.educationLevel())
                 .build();
         npc.setStats(stats);
 

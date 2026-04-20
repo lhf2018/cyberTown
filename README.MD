@@ -8,8 +8,10 @@
 ## ✨ 核心特性
 
 - **🤖 AI驱动的NPC初始化** - 支持由大模型生成角色设定与数值属性
-- **🧠 智能决策系统** - NPC会根据时间、地点、心情和人际关系自主决定下一步行动
-- **💬 自然语言对话** - 使用DeepSeek API与NPC进行真实、有上下文的对话
+- **🧠 智能决策系统** - NPC会根据短期状态 + 长期资产/能力做决策
+- **💬 自然语言对话** - 对话会基于当前动作、目标、财务、能力、个性动态回复
+- **🕹️ 上帝模式** - 支持自然语言直接修改NPC属性，并获得NPC变更反馈
+- **📣 世界广播面板** - 运行页顶部动态展示世界事件（当前为展示层）
 - **⏰ 动态时间系统** - 游戏时间以6倍现实速度流动，影响NPC的日常作息
 - **🎭 情感与关系模拟** - NPC拥有心情值，会建立并维护与其他NPC的关系网络
 - **🏢 场景化地点** - 科技公司、酒吧、黑市等不同地点塑造不同的交互氛围
@@ -83,7 +85,8 @@ mvn clean spring-boot:run
 |:-------|:--------------------------|:----------------|:------------------------------------------------|
 | `GET`  | `/api/town/npcs`          | **获取所有NPC列表**   | `curl http://localhost:8080/api/town/npcs`      |
 | `GET`  | `/api/town/npc/{id}`      | **获取单个NPC详情**   | `curl http://localhost:8080/api/town/npc/npc-1` |
-| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**    | 见下方详细示例（未完全实现）                                  |
+| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**    | 基于当前状态+长期属性+个性进行回复 |
+| `POST` | `/api/town/npc/{id}/god-command` | **上帝模式修改NPC** | 自然语言修改属性，返回执行后NPC反馈 |
 | `GET` | `/api/town/npcs/status/stream` | **实时获取所有NPC状态** | 见下方详细示例                                         |
 
 ### ⏱️ 时间控制接口
@@ -102,6 +105,7 @@ mvn clean spring-boot:run
 | `POST` | `/api/town/init/ai`          | AI初始化（支持数量与清空参数）        |
 | `POST` | `/api/town/broadcast/status` | 手动广播当前NPC状态             |
 | `POST` | `/api/town/simulation/end`   | 结束模拟并清空NPC（用于重新初始化）     |
+| `GET`  | `/api/town/world/broadcast`  | 获取世界广播文案（展示层）          |
 
 ---
 
@@ -222,8 +226,30 @@ logging:
 AI 初始化入口会读取以下字段：
 - 角色字段：`name`、`occupation`、`personality`、`location`、`currentAction`、`currentGoal`
 - 属性字段：`energy`、`hunger`、`happiness`、`socialNeed`、`money`、`intelligence`、`charisma`
+- 长期字段：`skillLevel`、`knowledgeLevel`、`health`、`reputation`、`savings`、`debt`、`workExperience`、`educationLevel`
 
 如需扩展角色维度，可从 `AIService.generateNPCBlueprints()` 和 `NPCSimulatorService.createFromBlueprint()` 开始。
+
+### 上帝模式示例
+
+请求：
+
+```json
+POST /api/town/npc/npc-ai-xxxx/god-command
+{
+  "instruction": "把他现金改成20000，负债清零，目标改成三个月内买房，技能提升到85"
+}
+```
+
+返回（节选）：
+
+```json
+{
+  "message": "上帝指令执行完成",
+  "npcName": "夜枭",
+  "npcReply": "我刚把债务从终端里抹干净了，现在准备冲高技能去接更贵的单。"
+}
+```
 
 ### 增加新的地点类型
 
