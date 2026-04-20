@@ -7,14 +7,14 @@ spring:
   ai:
     openai:
       # API密钥：从环境变量DEEPSEEK_API_KEY读取，如果不存在则使用默认值
-      api-key: ${DEEPSEEK_API_KEY:sk-your-key-here}
+      api-key: sk-6446d88505c043418969e96a740af9c4
       # DeepSeek API端点（兼容OpenAI格式）
       base-url: https://api.deepseek.com
       chat:
         options:
           model: deepseek-chat      # 使用的DeepSeek模型
-          temperature: 0.7          # 创造性程度（0-1，越高回答越随机）
-          max-tokens: 500           # 最大返回token数，控制回答长度
+          temperature: 0.9          # 创造性程度（0-1，越高回答越随机）
+          max-tokens: 200           # 最大返回token数，控制回答长度
 
   # ========== 数据库配置 ==========
   datasource:

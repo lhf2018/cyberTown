@@ -7,13 +7,14 @@
 
 ## ✨ 核心特性
 
-- **🤖 AI驱动的NPC** - 10个初始NPC，每个都有独特的性格、职业与行为模式
+- **🤖 AI驱动的NPC初始化** - 支持由大模型生成角色设定与数值属性
 - **🧠 智能决策系统** - NPC会根据时间、地点、心情和人际关系自主决定下一步行动
 - **💬 自然语言对话** - 使用DeepSeek API与NPC进行真实、有上下文的对话
 - **⏰ 动态时间系统** - 游戏时间以6倍现实速度流动，影响NPC的日常作息
 - **🎭 情感与关系模拟** - NPC拥有心情值，会建立并维护与其他NPC的关系网络
 - **🏢 场景化地点** - 科技公司、酒吧、黑市等不同地点塑造不同的交互氛围
 - **🔄 自动状态更新** - 每分钟自动更新所有NPC状态，世界持续"呼吸"与演进
+- **🖥️ 前端双页面流程** - 初始化页与运行页分离，流程更清晰
 - **🌐 完整REST API** - 提供开箱即用的API接口，便于前端集成与功能扩展
 
 ---
@@ -58,6 +59,18 @@ mvn clean spring-boot:run
 ...
 🏙️ 赛博小镇已就绪！
 ```
+
+### 步骤 5：页面入口与流程
+
+- 初始化入口：`http://localhost:8080/`
+- 运行页面：`http://localhost:8080/runtime.html`
+- AI 初始化工具页（兼容保留）：`http://localhost:8080/ai-init.html`
+
+推荐流程：
+1. 打开初始化页（`/`）
+2. 执行普通初始化或 AI 初始化
+3. 初始化完成后自动跳转运行页
+4. 如需重新开局，在运行页点击“结束模拟并返回初始化”
 ---
 
 ## 📡 API 接口速查
@@ -82,9 +95,13 @@ mvn clean spring-boot:run
 
 ### 🛠️ 系统管理接口
 
-| 方法     | 端点                 | 说明                   |
-|:-------|:-------------------|:---------------------|
-| `GET`  | `/api/town/status` | 获取小镇运行**状态**         |
+| 方法     | 端点                           | 说明                      |
+|:-------|:-----------------------------|:------------------------|
+| `GET`  | `/api/town/status`           | 获取小镇运行**状态**            |
+| `POST` | `/api/town/init`             | 普通初始化（默认配置）             |
+| `POST` | `/api/town/init/ai`          | AI初始化（支持数量与清空参数）        |
+| `POST` | `/api/town/broadcast/status` | 手动广播当前NPC状态             |
+| `POST` | `/api/town/simulation/end`   | 结束模拟并清空NPC（用于重新初始化）     |
 
 ---
 
@@ -200,6 +217,14 @@ logging:
 
 在 `NPCSimulatorService.initializeNPCs()` 方法中，参照现有格式添加新的NPC数据即可。
 
+### 调整 AI 初始化字段
+
+AI 初始化入口会读取以下字段：
+- 角色字段：`name`、`occupation`、`personality`、`location`、`currentAction`、`currentGoal`
+- 属性字段：`energy`、`hunger`、`happiness`、`socialNeed`、`money`、`intelligence`、`charisma`
+
+如需扩展角色维度，可从 `AIService.generateNPCBlueprints()` 和 `NPCSimulatorService.createFromBlueprint()` 开始。
+
 ### 增加新的地点类型
 
 1. 在 `Location` 实体中扩展地点属性。
@@ -218,6 +243,11 @@ logging:
 **踏入霓虹闪烁的赛博街道，开始你的冒险吧！** ✨
 
 > 如有问题，请查看日志或提交Issue。欢迎提出改进建议！
+
+## 📘 本地 Wiki
+
+- Wiki 索引：`docs/wiki/README.md`
+- 迭代记录：`docs/wiki/iteration-log.md`
 
 ## 计划后面做的
 > 1. 对话干预决策

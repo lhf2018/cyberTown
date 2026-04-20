@@ -88,6 +88,35 @@ public class TownController {
     }
 
     /**
+     * 使用大模型初始化人物
+     */
+    @PostMapping("/init/ai")
+    public Map<String, Object> initializeTownWithAI(@RequestBody(required = false) Map<String, Object> request) {
+        int count = 5;
+        boolean clearExisting = false;
+
+        if (request != null) {
+            Object countObj = request.get("count");
+            if (countObj instanceof Number number) {
+                count = number.intValue();
+            }
+            Object clearObj = request.get("clearExisting");
+            if (clearObj instanceof Boolean bool) {
+                clearExisting = bool;
+            }
+        }
+
+        List<NPC> created = npcSimulatorService.initializeNPCsWithAI(count, clearExisting);
+
+        return Map.of(
+                "message", "AI人物生成完成",
+                "createdCount", created.size(),
+                "totalCount", npcRepository.count(),
+                "npcs", created
+        );
+    }
+
+    /**
      * 6. 获取小镇状态
      */
     @GetMapping("/status")
@@ -301,6 +330,20 @@ public class TownController {
                 "locationStats", locationStats,
                 "occupationStats", occupationStats,
                 "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
+    /**
+     * 结束模拟并清空NPC
+     */
+    @PostMapping("/simulation/end")
+    public Map<String, Object> endSimulation() {
+        long before = npcRepository.count();
+        npcSimulatorService.endSimulation();
+        return Map.of(
+                "message", "模拟已结束，可重新初始化",
+                "deletedCount", before,
+                "currentCount", npcRepository.count()
         );
     }
 

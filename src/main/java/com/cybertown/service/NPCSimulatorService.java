@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 /**
  * NPC模拟服务 - 核心大脑
@@ -30,6 +31,7 @@ public class NPCSimulatorService {
     private final WorldState worldState;             // 游戏世界状态
     private final WorldService worldService;         // 世界信息服务
     private final NPCBehaviorGraph npcBehaviorGraph;
+    private final AIService aiService;
 
     private final Random random = new Random();
 
@@ -526,6 +528,28 @@ public class NPCSimulatorService {
     }
 
     /**
+     * 使用大模型批量创建NPC
+     */
+    public List<NPC> initializeNPCsWithAI(int count, boolean clearExisting) {
+        int targetCount = Math.max(1, Math.min(20, count));
+        if (clearExisting) {
+            log.warn("按请求清空现有NPC数据后重新生成");
+            npcRepository.deleteAll();
+        }
+
+        List<String> existingNames = npcRepository.findAll().stream().map(NPC::getName).toList();
+        List<AIService.NPCBlueprint> blueprints = aiService.generateNPCBlueprints(targetCount, existingNames);
+
+        List<NPC> created = blueprints.stream()
+                .limit(targetCount)
+                .map(this::createFromBlueprint)
+                .toList();
+
+        log.info("AI初始化完成，新增{}个NPC", created.size());
+        return created;
+    }
+
+    /**
      * 创建单个NPC
      */
     private void createNPC(String id, String name, String occupation, String personality, String location) {
@@ -551,21 +575,48 @@ public class NPCSimulatorService {
         log.info("创建NPC: {} - {} (@{})，心情: {}，能量: {}，金钱: {}", name, occupation, location, stats.getHappiness(), stats.getEnergy(), stats.getMoney());
     }
 
+    private NPC createFromBlueprint(AIService.NPCBlueprint blueprint) {
+        NPC npc = new NPC();
+        npc.setId("npc-ai-" + UUID.randomUUID().toString().substring(0, 8));
+        npc.setName(blueprint.name());
+        npc.setOccupation(blueprint.occupation());
+        npc.setPersonality(blueprint.personality());
+        npc.setCurrentLocation(blueprint.location());
+        npc.setCurrentAction(blueprint.currentAction());
+        npc.setCurrentGoal(blueprint.currentGoal());
+
+        NPCStats stats = NPCStats.builder()
+                .energy(blueprint.energy())
+                .hunger(blueprint.hunger())
+                .happiness(blueprint.happiness())
+                .socialNeed(blueprint.socialNeed())
+                .money(blueprint.money())
+                .intelligence(blueprint.intelligence())
+                .charisma(blueprint.charisma())
+                .build();
+        npc.setStats(stats);
+
+        NPC saved = npcRepository.save(npc);
+        log.info("AI创建NPC: {} - {} (@{})", saved.getName(), saved.getOccupation(), saved.getCurrentLocation());
+        return saved;
+    }
+
     /**
      * 获取初始动作（根据职业）
      */
     private String getInitialAction(String occupation) {
         return switch (occupation) {
-            case "程序员", "设计师" -> "工作中";
-            case "酒吧老板" -> "准备营业";
-            case "警察" -> "巡逻中";
-            case "医生" -> "门诊中";
-            case "保安" -> "执勤中";
-            case "黑客" -> "编写代码";
-            case "舞者" -> "练习舞蹈";
-            case "出租车司机" -> "等待乘客";
-            case "黑市商人" -> "查看货物";
-            default -> "活动中";
+            case "程序员" -> randomPick("工作中", "修复线上BUG", "写自动化脚本");
+            case "设计师" -> randomPick("工作中", "调整界面配色", "打磨作品细节");
+            case "酒吧老板" -> randomPick("准备营业", "清点库存", "招呼熟客");
+            case "警察" -> randomPick("巡逻中", "处理报案", "检查监控记录");
+            case "医生" -> randomPick("门诊中", "查看病历", "准备手术器材");
+            case "保安" -> randomPick("执勤中", "巡查商场", "检查安防系统");
+            case "黑客" -> randomPick("编写代码", "渗透测试", "排查系统漏洞");
+            case "舞者" -> randomPick("练习舞蹈", "准备演出", "编排新动作");
+            case "出租车司机" -> randomPick("等待乘客", "接单途中", "车辆保养");
+            case "黑市商人" -> randomPick("查看货物", "联系买家", "评估行情");
+            default -> randomPick("活动中", "闲逛", "整理思绪");
         };
     }
 
@@ -574,14 +625,18 @@ public class NPCSimulatorService {
      */
     private String getInitialGoal(String occupation) {
         return switch (occupation) {
-            case "程序员" -> "完成当前项目";
-            case "设计师" -> "创作新作品";
-            case "警察" -> "维持辖区治安";
-            case "医生" -> "治疗更多病人";
-            case "酒吧老板" -> "提升酒吧营业额";
-            case "黑市商人" -> "完成一笔大交易";
-            default -> "做好本职工作";
+            case "程序员" -> randomPick("完成当前项目", "学习新框架", "优化系统性能");
+            case "设计师" -> randomPick("创作新作品", "打造爆款视觉", "提高个人知名度");
+            case "警察" -> randomPick("维持辖区治安", "侦破近期案件", "降低街区犯罪率");
+            case "医生" -> randomPick("治疗更多病人", "提升诊断效率", "研究疑难病例");
+            case "酒吧老板" -> randomPick("提升酒吧营业额", "扩大夜场影响力", "打造特色招牌活动");
+            case "黑市商人" -> randomPick("完成一笔大交易", "建立稳定供货链", "避开执法追踪");
+            default -> randomPick("做好本职工作", "提升职业技能", "结识更多人脉");
         };
+    }
+
+    private String randomPick(String... options) {
+        return options[random.nextInt(options.length)];
     }
 
     // ======================== 公开方法（供Controller调用） ========================
@@ -623,5 +678,14 @@ public class NPCSimulatorService {
         npcRepository.deleteAll();
         initializeNPCs();
         log.info("所有NPC已重置");
+    }
+
+    /**
+     * 结束当前模拟，清空所有NPC，便于重新初始化
+     */
+    public void endSimulation() {
+        long count = npcRepository.count();
+        npcRepository.deleteAll();
+        log.warn("模拟已结束，清空{}个NPC", count);
     }
 }

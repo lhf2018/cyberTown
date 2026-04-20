@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>赛博小镇运行面板</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #090d16;
+            --panel: #121a2a;
+            --line: #24314d;
+            --text: #d8e3ff;
+            --muted: #93a2c5;
+            --primary: #4f86ff;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Microsoft YaHei", sans-serif;
+            background: radial-gradient(circle at top right, #1a2440, var(--bg) 40%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .wrap {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 16px 20px;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+        .top {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        h1 { margin: 0; font-size: 24px; }
+        .status { color: var(--muted); font-size: 14px; }
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+        }
+        button {
+            background: var(--primary);
+            color: #fff;
+            border: 0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button.secondary { background: #334155; }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        .metric {
+            background: #0d1423;
+            border: 1px solid #1e2c46;
+            border-radius: 10px;
+            padding: 10px;
+        }
+        .metric .label { color: var(--muted); font-size: 13px; }
+        .metric .value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+        .npc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+        }
+        .card {
+            border: 1px solid #24314d;
+            background: #0d1423;
+            border-radius: 10px;
+            padding: 10px;
+        }
+        .name {
+            font-weight: 700;
+            font-size: 16px;
+            margin-bottom: 6px;
+        }
+        .line {
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 3px;
+            word-break: break-word;
+        }
+        .bar {
+            height: 7px;
+            border-radius: 4px;
+            background: #1f2937;
+            overflow: hidden;
+            margin: 5px 0 7px;
+        }
+        .bar > span {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg, #22d3ee, #4f86ff);
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="panel">
+        <div class="top">
+            <h1>赛博小镇运行面板</h1>
+            <div class="status" id="connectionStatus">连接中...</div>
+        </div>
+        <div class="row">
+            <button id="broadcastBtn" class="secondary">手动广播状态</button>
+            <button id="reloadBtn" class="secondary">立即刷新</button>
+            <button id="endSimBtn">结束模拟并返回初始化</button>
+        </div>
+        <div class="row status" id="opStatus"></div>
+    </div>
+
+    <div class="panel">
+        <div class="metrics">
+            <div class="metric"><div class="label">NPC 总数</div><div class="value" id="mTotal">-</div></div>
+            <div class="metric"><div class="label">饥饿人数</div><div class="value" id="mHungry">-</div></div>
+            <div class="metric"><div class="label">疲劳人数</div><div class="value" id="mTired">-</div></div>
+            <div class="metric"><div class="label">开心人数</div><div class="value" id="mHappy">-</div></div>
+            <div class="metric"><div class="label">最后更新时间</div><div class="value" id="mUpdated">-</div></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="top">
+            <h1 style="font-size:20px;">实时 NPC 状态</h1>
+            <div class="status" id="npcCountText"></div>
+        </div>
+        <div id="npcGrid" class="npc-grid"></div>
+    </div>
+</div>
+
+<script>
+    const connectionStatus = document.getElementById("connectionStatus");
+    const opStatus = document.getElementById("opStatus");
+    const npcGrid = document.getElementById("npcGrid");
+    const npcCountText = document.getElementById("npcCountText");
+
+    const mTotal = document.getElementById("mTotal");
+    const mHungry = document.getElementById("mHungry");
+    const mTired = document.getElementById("mTired");
+    const mHappy = document.getElementById("mHappy");
+    const mUpdated = document.getElementById("mUpdated");
+
+    let source = null;
+
+    function setOpStatus(text, isError = false) {
+        opStatus.style.color = isError ? "#f87171" : "#93a2c5";
+        opStatus.textContent = text;
+    }
+
+    async function postJson(url) {
+        const resp = await fetch(url, { method: "POST" });
+        if (!resp.ok) {
+            throw new Error(`请求失败: ${url}`);
+        }
+        const ct = resp.headers.get("content-type") || "";
+        if (ct.includes("application/json")) return resp.json();
+        return resp.text();
+    }
+
+    function renderNPCList(list) {
+        const npcs = Array.isArray(list) ? list : [];
+        npcCountText.textContent = `共 ${npcs.length} 人`;
+        npcGrid.innerHTML = npcs.map((n) => {
+            const energy = Number(n.energy ?? n.stats?.energy ?? 0);
+            const hunger = Number(n.hunger ?? n.stats?.hunger ?? 0);
+            const happiness = Number(n.happiness ?? n.stats?.happiness ?? 0);
+            const socialNeed = Number(n.socialNeed ?? n.stats?.socialNeed ?? 0);
+            return `
+                <div class="card">
+                    <div class="name">${n.name || "未知"} · ${n.occupation || "-"}</div>
+                    <div class="line">位置：${n.location || n.currentLocation || "-"}</div>
+                    <div class="line">动作：${n.action || n.currentAction || "-"}</div>
+                    <div class="line">目标：${n.currentGoal || "-"}</div>
+                    <div class="line">状态：${n.statusSummary || "-"}</div>
+                    <div class="line">心情：${n.mood || "-"}</div>
+                    <div class="line">能量 ${energy}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, energy))}%"></span></div>
+                    <div class="line">饥饿 ${hunger}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, hunger))}%"></span></div>
+                    <div class="line">快乐 ${happiness}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, happiness))}%"></span></div>
+                    <div class="line">社交需求 ${socialNeed}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, socialNeed))}%"></span></div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    async function refreshSummary() {
+        const [summaryResp, npcsResp] = await Promise.all([
+            fetch("/api/town/stats/summary"),
+            fetch("/api/town/npcs")
+        ]);
+        if (!summaryResp.ok || !npcsResp.ok) {
+            throw new Error("读取汇总信息失败");
+        }
+        const summary = await summaryResp.json();
+        const npcs = await npcsResp.json();
+        if (!Array.isArray(npcs) || npcs.length === 0) {
+            window.location.href = "/";
+            return;
+        }
+        mTotal.textContent = summary.total ?? npcs.length ?? "-";
+        mHungry.textContent = summary.hungryCount ?? "-";
+        mTired.textContent = summary.tiredCount ?? "-";
+        mHappy.textContent = summary.happyCount ?? "-";
+        mUpdated.textContent = new Date().toLocaleTimeString();
+        renderNPCList(npcs);
+    }
+
+    function applyRealtimePayload(data) {
+        if (!data || !Array.isArray(data.npcs)) return;
+        renderNPCList(data.npcs);
+        mTotal.textContent = data.count ?? data.npcs.length;
+        mUpdated.textContent = new Date().toLocaleTimeString();
+    }
+
+    function connectSSE() {
+        if (source) source.close();
+        source = new EventSource("/api/town/npcs/status/stream");
+        connectionStatus.textContent = "SSE 连接中...";
+
+        source.addEventListener("initial", (ev) => {
+            const data = JSON.parse(ev.data);
+            applyRealtimePayload(data);
+            connectionStatus.textContent = "SSE 已连接";
+        });
+        source.addEventListener("update", (ev) => {
+            const data = JSON.parse(ev.data);
+            applyRealtimePayload(data);
+            connectionStatus.textContent = "实时更新中";
+        });
+        source.addEventListener("connected", () => {
+            connectionStatus.textContent = "SSE 已连接";
+        });
+        source.onerror = () => {
+            connectionStatus.textContent = "SSE断开，使用轮询";
+        };
+    }
+
+    async function runBroadcast() {
+        setOpStatus("正在手动广播...");
+        try {
+            const msg = await postJson("/api/town/broadcast/status");
+            setOpStatus(typeof msg === "string" ? msg : "广播完成");
+        } catch (e) {
+            setOpStatus(e.message, true);
+        }
+    }
+
+    async function endSimulationAndBack() {
+        setOpStatus("正在结束模拟并清空数据...");
+        try {
+            const data = await postJson("/api/town/simulation/end");
+            setOpStatus(`${data.message}（已清空 ${data.deletedCount} 人）`);
+            setTimeout(() => {
+                window.location.href = "/";
+            }, 400);
+        } catch (e) {
+            setOpStatus(e.message, true);
+        }
+    }
+
+    document.getElementById("broadcastBtn").addEventListener("click", runBroadcast);
+    document.getElementById("reloadBtn").addEventListener("click", () => refreshSummary().catch(err => setOpStatus(err.message, true)));
+    document.getElementById("endSimBtn").addEventListener("click", endSimulationAndBack);
+
+    refreshSummary().catch(err => setOpStatus(err.message, true));
+    connectSSE();
+    setInterval(() => {
+        if (connectionStatus.textContent.includes("轮询")) {
+            refreshSummary().catch(() => {});
+        }
+    }, 5000);
+</script>
+</body>
+</html>

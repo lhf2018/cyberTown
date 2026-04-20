@@ -4,6 +4,7 @@ import lombok.Data;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 世界状态类
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
 @Component
 @Data
 public class WorldState {
+    private static final String[] WEATHER_OPTIONS = {"SUNNY", "RAINY", "CYBER_RAIN", "FOGGY"};
 
     // 游戏内时间（2088年赛博朋克世界）
     private LocalDateTime gameTime;
@@ -27,10 +29,15 @@ public class WorldState {
      * 构造函数：初始化世界状态
      */
     public WorldState() {
-        // 设置初始时间：2088年1月1日早上8点
-        this.gameTime = LocalDateTime.of(2088, 1, 1, 8, 0);
-        //todo 未来增加随机能力
-        this.weather = "SUNNY";  // 初始晴天
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        // 初始时间随机在白天和夜晚交界区间，保证开局状态不单一。
+        int hour = random.nextInt(6, 23); // 6:00 - 22:59
+        int minute = random.nextInt(0, 4) * 15; // 00/15/30/45
+        this.gameTime = LocalDateTime.of(2088, 1, 1, hour, minute);
+
+        // 初始天气随机
+        this.weather = WEATHER_OPTIONS[random.nextInt(WEATHER_OPTIONS.length)];
         this.paused = false;     // 初始未暂停
     }
 
