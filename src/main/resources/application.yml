@@ -7,7 +7,7 @@ spring:
   ai:
     openai:
       # API密钥：从环境变量DEEPSEEK_API_KEY读取，如果不存在则使用默认值
-      api-key: sk-6446d88505c043418969e96a740af9c4
+      api-key: todo
       # DeepSeek API端点（兼容OpenAI格式）
       base-url: https://api.deepseek.com
       chat:
