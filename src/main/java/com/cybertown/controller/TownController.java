@@ -4,6 +4,7 @@ import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.npc.NPCStats;
 import com.cybertown.repository.NPCRepository;
 import com.cybertown.service.AIService;
+import com.cybertown.service.NewsService;
 import com.cybertown.service.NPCSimulatorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class TownController {
     private final NPCRepository npcRepository;
     private final AIService aiService;
+    private final NewsService newsService;
     private final NPCSimulatorService npcSimulatorService;
     private final SimpMessagingTemplate messagingTemplate;
 
@@ -64,18 +66,63 @@ public class TownController {
      * 3. 与NPC对话
      */
     @PostMapping("/npc/{id}/talk")
-    public Map<String, String> talkToNPC(@PathVariable String id,
+    public Map<String, Object> talkToNPC(@PathVariable String id,
                                          @RequestBody Map<String, String> request) {
         String message = request.get("message");
         NPC npc = getNPC(id);
+        return processTalk(npc, message);
+    }
 
-        //todo 待完善
+    @GetMapping(value = "/npc/{id}/talk/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter talkToNPCStream(@PathVariable String id, @RequestParam("message") String message) {
+        NPC npc = getNPC(id);
+        SseEmitter emitter = new SseEmitterUTF8(120_000L);
+        CompletableFuture.runAsync(() -> {
+            try {
+                Map<String, Object> result = processTalk(npc, message);
+                String response = String.valueOf(result.getOrDefault("response", ""));
+                for (String chunk : splitToChunks(response, 8)) {
+                    sendSSEEvent(emitter, "chunk", Map.of("text", chunk));
+                    Thread.sleep(30);
+                }
+                sendSSEEvent(emitter, "done", result);
+                emitter.complete();
+            } catch (Exception e) {
+                try {
+                    sendSSEEvent(emitter, "error", Map.of("message", "对话失败: " + e.getMessage()));
+                } catch (Exception ignored) {
+                }
+                emitter.completeWithError(e);
+            }
+        });
+        return emitter;
+    }
+
+    private Map<String, Object> processTalk(NPC npc, String message) {
         String response = aiService.generateDialogue(npc, message);
+        appendDialogueMemory(npc, message, response);
+        AIService.DialogueInfluence influence = aiService.evaluateDialogueInfluence(npc, message);
+        if (influence.active()) {
+            npc.setDialogueInfluence(influence.summary());
+            npc.setDialogueInfluenceWeight(influence.weight());
+            npc.setDialogueInfluenceExpiresAt(influence.expiresAt());
+            npc.getCurrentThoughts().add("玩家对话影响: " + influence.summary());
+        } else {
+            npc.setDialogueInfluence(null);
+            npc.setDialogueInfluenceWeight(0);
+            npc.setDialogueInfluenceExpiresAt(null);
+        }
+        npcRepository.save(npc);
 
         return Map.of(
                 "npc", npc.getName(),
                 "response", response,
-                "mood", getMoodEmoji(npc.getStats().getHappiness())
+                "mood", getMoodEmoji(npc.getStats().getHappiness()),
+                "influenceActive", influence.active(),
+                "influenceSummary", influence.active() ? influence.summary() : null,
+                "influenceWeight", influence.active() ? influence.weight() : 0,
+                "influenceDurationMinutes", influence.active() ? influence.durationMinutes() : 0,
+                "context", npc.getDialogueMemory() == null ? "" : npc.getDialogueMemory()
         );
     }
 
@@ -87,8 +134,12 @@ public class TownController {
         NPC npc = getNPC(id);
         String instruction = request == null ? null : request.get("instruction");
         AIService.GodModification mod = aiService.parseGodInstruction(npc, instruction);
+        mod = enhanceGodModificationFromInstruction(mod, instruction);
 
         applyGodModification(npc, mod);
+        applyCompensationOverridesFromInstruction(npc, instruction);
+        String requestedSchool = detectSchoolFromInstruction(instruction);
+        refreshAndStoreEducationHistory(npc, requestedSchool);
         NPC saved = npcRepository.save(npc);
         String npcReply = aiService.generateGodReply(saved, instruction);
 
@@ -96,6 +147,7 @@ public class TownController {
                 "message", "上帝指令执行完成",
                 "npcId", saved.getId(),
                 "npcName", saved.getName(),
+                "educationLevel", saved.getStats().getEducationLevel(),
                 "npcReply", npcReply,
                 "npc", saved
         );
@@ -297,6 +349,41 @@ public class TownController {
         );
     }
 
+    @GetMapping("/world/news")
+    public Map<String, Object> getWorldNews() {
+        return Map.of(
+                "headlines", newsService.getTopHeadlines(8),
+                "brief", newsService.getNewsBrief(),
+                "updatedAt", newsService.getLastUpdated().toString()
+        );
+    }
+
+    @GetMapping("/npcs/thought-bubbles")
+    public Map<String, Object> getNPCThoughtBubbles() {
+        List<NPC> npcs = npcRepository.findAll();
+        if (npcs.isEmpty()) {
+            return Map.of("bubbles", List.of(), "timestamp", LocalDateTime.now().toString());
+        }
+        Collections.shuffle(npcs);
+        int size = Math.min(3, npcs.size());
+        List<Map<String, Object>> bubbles = new ArrayList<>();
+        String news = newsService.getNewsBrief();
+        for (int i = 0; i < size; i++) {
+            NPC npc = npcs.get(i);
+            String text = aiService.generateThoughtBubble(npc, news);
+            bubbles.add(Map.of(
+                    "npcId", npc.getId(),
+                    "npcName", npc.getName(),
+                    "occupation", npc.getOccupation(),
+                    "text", text
+            ));
+        }
+        return Map.of(
+                "bubbles", bubbles,
+                "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
     /**
      * 10. 获取单个NPC的详细状态
      */
@@ -311,6 +398,7 @@ public class TownController {
                 "id", npc.getId(),
                 "name", npc.getName(),
                 "occupation", npc.getOccupation(),
+                "employer", npc.getEmployer() == null ? "自由职业" : npc.getEmployer(),
                 "personality", npc.getPersonality()
         ));
 
@@ -320,12 +408,19 @@ public class TownController {
                 "goal", npc.getCurrentGoal()
         ));
 
-        response.put("数值状态", Map.of(
-                "energy", npc.getStats().getEnergy(),
-                "hunger", npc.getStats().getHunger(),
-                "happiness", npc.getStats().getHappiness(),
-                "socialNeed", npc.getStats().getSocialNeed()
-        ));
+        Map<String, Object> detailedStats = new LinkedHashMap<>();
+        detailedStats.put("energy", npc.getStats().getEnergy());
+        detailedStats.put("hunger", npc.getStats().getHunger());
+        detailedStats.put("happiness", npc.getStats().getHappiness());
+        detailedStats.put("socialNeed", npc.getStats().getSocialNeed());
+        detailedStats.put("skillLevel", npc.getStats().getSkillLevel());
+        detailedStats.put("knowledgeLevel", npc.getStats().getKnowledgeLevel());
+        detailedStats.put("technicalKnowledge", npc.getStats().getTechnicalKnowledge());
+        detailedStats.put("businessKnowledge", npc.getStats().getBusinessKnowledge());
+        detailedStats.put("socialKnowledge", npc.getStats().getSocialKnowledge());
+        detailedStats.put("practicalSkill", npc.getStats().getPracticalSkill());
+        detailedStats.put("creativeSkill", npc.getStats().getCreativeSkill());
+        response.put("数值状态", detailedStats);
 
         response.put("状态描述", Map.of(
                 "mood", getMoodEmoji(npc.getStats().getHappiness()),
@@ -340,6 +435,50 @@ public class TownController {
         ));
 
         return response;
+    }
+
+    @GetMapping("/npc/{id}/profile/extended")
+    public Map<String, Object> getNPCExtendedProfile(@PathVariable String id) {
+        NPC npc = getNPC(id);
+        NPCStats s = npc.getStats();
+
+        double money = s.getMoney();
+        double savings = s.getSavings();
+        double debt = s.getDebt();
+        double totalAssets = money + savings;
+        double netWorth = totalAssets - debt;
+        double liquidityRatio = totalAssets <= 0 ? 0 : (money / totalAssets) * 100;
+        double debtToAssetRatio = totalAssets <= 0 ? 0 : (debt / totalAssets) * 100;
+
+        Map<String, Object> assets = new LinkedHashMap<>();
+        assets.put("currency", "元");
+        assets.put("cash", round2(money));
+        assets.put("savings", round2(savings));
+        assets.put("debt", round2(debt));
+        assets.put("totalAssets", round2(totalAssets));
+        assets.put("netWorth", round2(netWorth));
+        assets.put("liquidityRatio", round2(liquidityRatio));
+        assets.put("debtToAssetRatio", round2(debtToAssetRatio));
+        assets.put("riskLevel", debtToAssetRatio > 70 ? "高风险" : (debtToAssetRatio > 40 ? "中风险" : "低风险"));
+
+        if (npc.getEducationHistory() == null || npc.getEducationHistory().isBlank()) {
+            refreshAndStoreEducationHistory(npc, null);
+            npcRepository.save(npc);
+        }
+        List<Map<String, Object>> educationTimeline = parseEducationHistory(npc.getEducationHistory());
+        Map<String, Object> compensation = buildCompensation(npc);
+
+        return Map.of(
+                "npcId", npc.getId(),
+                "npcName", npc.getName(),
+                "occupation", npc.getOccupation(),
+                "educationLevel", s.getEducationLevel(),
+                "workExperienceMonths", s.getWorkExperience(),
+                "assets", assets,
+                "compensation", compensation,
+                "educationTimeline", educationTimeline,
+                "timestamp", LocalDateTime.now().toString()
+        );
     }
 
     /**
@@ -457,9 +596,11 @@ public class TownController {
             status.put("id", npc.getId());
             status.put("name", npc.getName());
             status.put("occupation", npc.getOccupation());
+            status.put("employer", npc.getEmployer());
             status.put("location", npc.getCurrentLocation());
             status.put("action", npc.getCurrentAction());
             status.put("currentGoal", npc.getCurrentGoal());
+            status.put("dialogueMemory", npc.getDialogueMemory());
 
             // 基础状态值
             status.put("energy", npc.getStats().getEnergy());
@@ -471,6 +612,11 @@ public class TownController {
             status.put("debt", npc.getStats().getDebt());
             status.put("skillLevel", npc.getStats().getSkillLevel());
             status.put("knowledgeLevel", npc.getStats().getKnowledgeLevel());
+            status.put("technicalKnowledge", npc.getStats().getTechnicalKnowledge());
+            status.put("businessKnowledge", npc.getStats().getBusinessKnowledge());
+            status.put("socialKnowledge", npc.getStats().getSocialKnowledge());
+            status.put("practicalSkill", npc.getStats().getPracticalSkill());
+            status.put("creativeSkill", npc.getStats().getCreativeSkill());
             status.put("health", npc.getStats().getHealth());
             status.put("reputation", npc.getStats().getReputation());
             status.put("educationLevel", npc.getStats().getEducationLevel());
@@ -554,7 +700,11 @@ public class TownController {
         if (mod.currentLocation() != null && !mod.currentLocation().isBlank()) npc.setCurrentLocation(mod.currentLocation().trim());
         if (mod.currentAction() != null && !mod.currentAction().isBlank()) npc.setCurrentAction(mod.currentAction().trim());
         if (mod.currentGoal() != null && !mod.currentGoal().isBlank()) npc.setCurrentGoal(mod.currentGoal().trim());
-        if (mod.educationLevel() != null && !mod.educationLevel().isBlank()) s.setEducationLevel(mod.educationLevel().trim());
+        if (mod.educationLevel() != null && !mod.educationLevel().isBlank()) {
+            String normalizedEducation = normalizeEducationLevel(mod.educationLevel());
+            s.setEducationLevel(normalizedEducation);
+            npc.setEmployer(getEmployerByOccupationAndEducation(npc.getOccupation(), normalizedEducation));
+        }
 
         if (mod.money() != null) s.setMoney(Math.max(0, mod.money()));
         if (mod.savings() != null) s.setSavings(Math.max(0, mod.savings()));
@@ -575,5 +725,469 @@ public class TownController {
 
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private void appendDialogueMemory(NPC npc, String playerMessage, String npcResponse) {
+        String old = npc.getDialogueMemory() == null ? "" : npc.getDialogueMemory().trim();
+        String playerText = shorten(playerMessage, 120);
+        String npcText = shorten(npcResponse, 160);
+        String entry = "玩家: " + playerText + " | " + npc.getName() + ": " + npcText;
+        String merged = old.isBlank() ? entry : old + "\n" + entry;
+        String[] lines = merged.split("\n");
+        int keep = Math.min(6, lines.length);
+        StringBuilder sb = new StringBuilder();
+        for (int i = lines.length - keep; i < lines.length; i++) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(lines[i]);
+        }
+        npc.setDialogueMemory(sb.toString());
+    }
+
+    private String shorten(String text, int maxLen) {
+        if (text == null) return "";
+        String clean = text.trim();
+        if (clean.length() <= maxLen) return clean;
+        return clean.substring(0, maxLen) + "...";
+    }
+
+    private List<String> splitToChunks(String text, int chunkSize) {
+        List<String> chunks = new ArrayList<>();
+        if (text == null || text.isBlank()) {
+            chunks.add("");
+            return chunks;
+        }
+        int size = Math.max(2, chunkSize);
+        for (int i = 0; i < text.length(); i += size) {
+            chunks.add(text.substring(i, Math.min(text.length(), i + size)));
+        }
+        return chunks;
+    }
+
+    private double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private List<Map<String, Object>> buildEducationTimeline(NPC npc) {
+        String occupation = npc.getOccupation() == null ? "" : npc.getOccupation();
+        String level = npc.getStats().getEducationLevel() == null ? "高中" : npc.getStats().getEducationLevel();
+
+        List<Map<String, Object>> timeline = new ArrayList<>();
+        timeline.add(step("高中", chooseSchool(occupation, "highSchool"), "基础教育与职业启蒙"));
+
+        if (isAtLeast(level, "大专")) {
+            timeline.add(step("大专", chooseSchool(occupation, "college"), "面向岗位的应用能力训练"));
+        }
+        if (isAtLeast(level, "本科")) {
+            timeline.add(step("本科", chooseSchool(occupation, "bachelor"), majorByOccupation(occupation, "本科")));
+        }
+        if (isAtLeast(level, "硕士")) {
+            timeline.add(step("硕士", chooseSchool(occupation, "master"), majorByOccupation(occupation, "硕士")));
+        }
+        if (isAtLeast(level, "博士")) {
+            timeline.add(step("博士", chooseSchool(occupation, "phd"), majorByOccupation(occupation, "博士")));
+        }
+        if ("职业认证".equals(level)) {
+            timeline.add(step("职业认证", chooseSchool(occupation, "cert"), "行业认证与在岗技能提升"));
+        }
+        return timeline;
+    }
+
+    private Map<String, Object> step(String stage, String school, String focus) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("stage", stage);
+        map.put("school", school);
+        map.put("focus", focus);
+        return map;
+    }
+
+    private boolean isAtLeast(String current, String target) {
+        List<String> order = List.of("高中", "大专", "本科", "硕士", "博士");
+        int c = order.indexOf(current);
+        int t = order.indexOf(target);
+        if (c == -1) c = 0;
+        return c >= t;
+    }
+
+    private String majorByOccupation(String occupation, String stage) {
+        if ("硕士".equals(stage)) {
+            if (occupation.contains("程序员") || occupation.contains("黑客")) {
+                return "研究方向：分布式系统性能优化、可信人工智能与网络攻防";
+            }
+            if (occupation.contains("医生")) {
+                return "研究方向：精准医学、生物信息学与临床转化";
+            }
+            if (occupation.contains("警察") || occupation.contains("保安")) {
+                return "研究方向：智能安防治理、数字取证与公共安全";
+            }
+            if (occupation.contains("设计")) {
+                return "研究方向：计算设计、交互认知与数字艺术方法论";
+            }
+            return "研究方向：组织管理、数据决策与社会系统建模";
+        }
+        if ("博士".equals(stage)) {
+            if (occupation.contains("程序员") || occupation.contains("黑客")) {
+                return "博士课题：大规模软件演化理论、攻防博弈与形式化验证";
+            }
+            if (occupation.contains("医生")) {
+                return "博士课题：复杂疾病机制、医疗大模型与循证医学体系";
+            }
+            if (occupation.contains("警察") || occupation.contains("保安")) {
+                return "博士课题：城市韧性安全、犯罪预测模型与治理策略评估";
+            }
+            if (occupation.contains("设计")) {
+                return "博士课题：人机协同设计理论、生成式美学与创作伦理";
+            }
+            return "博士课题：跨学科社会计算、制度优化与长期政策评估";
+        }
+        if (occupation.contains("程序员") || occupation.contains("黑客")) {
+            return stage + "方向：计算机科学、网络安全、软件工程";
+        }
+        if (occupation.contains("医生")) {
+            return stage + "方向：临床医学、生物医学工程";
+        }
+        if (occupation.contains("警察") || occupation.contains("保安")) {
+            return stage + "方向：治安学、刑事科学技术";
+        }
+        if (occupation.contains("设计")) {
+            return stage + "方向：数字媒体艺术、交互设计";
+        }
+        if (occupation.contains("司机")) {
+            return stage + "方向：交通运输、智能网联驾驶";
+        }
+        return stage + "方向：管理学、信息系统、社会学";
+    }
+
+    private String chooseSchool(String occupation, String stage) {
+        if (occupation.contains("程序员") || occupation.contains("黑客")) {
+            return switch (stage) {
+                case "highSchool" -> "北京第四中学";
+                case "college" -> "深圳职业技术大学";
+                case "bachelor" -> "浙江大学";
+                case "master" -> "北京邮电大学";
+                case "phd" -> "清华大学";
+                default -> "中国计算机学会（CCF）认证";
+            };
+        }
+        if (occupation.contains("医生")) {
+            return switch (stage) {
+                case "highSchool" -> "华中师范大学第一附属中学";
+                case "college" -> "首都医科大学燕京医学院";
+                case "bachelor" -> "复旦大学上海医学院";
+                case "master" -> "中山大学";
+                case "phd" -> "北京协和医学院";
+                default -> "国家执业医师资格认证";
+            };
+        }
+        if (occupation.contains("警察") || occupation.contains("保安")) {
+            return switch (stage) {
+                case "highSchool" -> "南京市金陵中学";
+                case "college" -> "浙江警官职业学院";
+                case "bachelor" -> "中国人民公安大学";
+                case "master" -> "中国刑事警察学院";
+                case "phd" -> "中国人民公安大学";
+                default -> "公安机关人民警察培训中心";
+            };
+        }
+        if (occupation.contains("设计") || occupation.contains("舞者")) {
+            return switch (stage) {
+                case "highSchool" -> "中央美术学院附属中等美术学校";
+                case "college" -> "上海工艺美术职业学院";
+                case "bachelor" -> "中国美术学院";
+                case "master" -> "清华大学美术学院";
+                case "phd" -> "中央美术学院";
+                default -> "Adobe 国际认证中心";
+            };
+        }
+        return switch (stage) {
+            case "highSchool" -> "成都市第七中学";
+            case "college" -> "北京电子科技职业学院";
+            case "bachelor" -> "武汉大学";
+            case "master" -> "上海交通大学";
+            case "phd" -> "北京大学";
+            default -> "国家职业技能鉴定中心";
+        };
+    }
+
+    private String normalizeEducationLevel(String rawLevel) {
+        if (rawLevel == null || rawLevel.isBlank()) {
+            return "高中";
+        }
+        String level = rawLevel.trim();
+        if (level.matches(".*(博士|PhD|phd|Doctor|doctor).*")) return "博士";
+        if (level.matches(".*(硕士|研究生|Master|master).*")) return "硕士";
+        if (level.matches(".*(本科|学士|Bachelor|bachelor|211|985).*")) return "本科";
+        if (level.matches(".*(大专|专科|高职|职业院校).*")) return "大专";
+        if (level.matches(".*(职业认证|认证|证书).*")) return "职业认证";
+        if (level.matches(".*(高中|中学).*")) return "高中";
+        return "高中";
+    }
+
+    private String getEmployerByOccupationAndEducation(String occupation, String educationLevel) {
+        if (occupation == null) {
+            return "自由职业";
+        }
+        String edu = educationLevel == null ? "高中" : educationLevel;
+        return switch (occupation) {
+            case "程序员" -> edu.matches("本科|硕士|博士")
+                    ? randomPick("阿里巴巴", "腾讯云", "字节跳动")
+                    : randomPick("本地软件外包公司", "中小型互联网公司", "创业工作室");
+            case "设计师" -> randomPick("米哈游设计中心", "字节创意工作室", "网易视觉实验室");
+            case "警察" -> "赛博市警署";
+            case "医生" -> randomPick("新纪元医疗集团", "赛博诊所联合体");
+            case "酒吧老板", "舞者" -> "霓虹夜场集团";
+            case "黑市商人", "黑客" -> "自由接单";
+            case "保安" -> "赛博安保公司";
+            case "出租车司机" -> "霓虹出行平台";
+            default -> "自由职业";
+        };
+    }
+
+    private Map<String, Object> buildCompensation(NPC npc) {
+        NPCStats s = npc.getStats();
+        String occupation = npc.getOccupation() == null ? "" : npc.getOccupation();
+        String education = s.getEducationLevel() == null ? "高中" : s.getEducationLevel();
+        double levelFactor = (s.getSkillLevel() * 0.45 + s.getKnowledgeLevel() * 0.25 + s.getReputation() * 0.2 + s.getWorkExperience() * 0.1);
+        double base = switch (occupation) {
+            case "程序员", "黑客" -> 18_000;
+            case "医生" -> 22_000;
+            case "警察" -> 11_000;
+            case "设计师", "舞者" -> 14_000;
+            case "酒吧老板", "黑市商人" -> 16_000;
+            case "出租车司机", "保安" -> 9_000;
+            default -> 10_000;
+        };
+        double monthlyCashAuto = Math.max(4500, base + levelFactor * 55);
+        boolean eligibleForOption = occupation.matches("程序员|设计师|黑客|产品经理|算法工程师")
+                && education.matches("本科|硕士|博士")
+                && npc.getEmployer() != null
+                && npc.getEmployer().matches(".*(阿里巴巴|腾讯云|字节跳动|米哈游|网易).*");
+        double monthlyOptionAuto = eligibleForOption
+                ? Math.max(0, monthlyCashAuto * (0.08 + s.getKnowledgeLevel() / 1200.0))
+                : 0;
+        double monthlyCash = s.getMonthlyCashIncome() > 0 ? s.getMonthlyCashIncome() : monthlyCashAuto;
+        double monthlyStockOption = s.getMonthlyStockOptionIncome() > 0 ? s.getMonthlyStockOptionIncome() : monthlyOptionAuto;
+        double monthlyTotal = monthlyCash + monthlyStockOption;
+        double annualTotal = monthlyTotal * 12;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("currency", "元");
+        result.put("monthlyCash", round2(monthlyCash));
+        result.put("monthlyStockOption", round2(monthlyStockOption));
+        result.put("monthlyTotal", round2(monthlyTotal));
+        result.put("annualTotal", round2(annualTotal));
+        result.put("monthlyDisplay", formatMoneyForDisplay(monthlyTotal));
+        result.put("annualDisplay", formatMoneyForDisplay(annualTotal));
+        result.put("payLevel", monthlyTotal > 35000 ? "高" : (monthlyTotal > 18000 ? "中" : "基础"));
+        result.put("hasStockOption", monthlyStockOption > 0.1);
+        return result;
+    }
+
+    private String formatMoneyForDisplay(double valueYuan) {
+        if (valueYuan >= 10_000) {
+            return round2(valueYuan / 10_000.0) + " 万元";
+        }
+        return round2(valueYuan / 1000.0) + " 千元";
+    }
+
+    private String randomPick(String... options) {
+        if (options == null || options.length == 0) {
+            return "";
+        }
+        return options[new Random().nextInt(options.length)];
+    }
+
+    private void refreshAndStoreEducationHistory(NPC npc, String preferredSchool) {
+        String targetLevel = npc.getStats().getEducationLevel() == null ? "高中" : npc.getStats().getEducationLevel();
+        List<Map<String, Object>> current = parseEducationHistory(npc.getEducationHistory());
+        LinkedHashMap<String, Map<String, Object>> byStage = new LinkedHashMap<>();
+        for (Map<String, Object> row : current) {
+            String stage = safePart(row.get("stage"));
+            if (!stage.isBlank()) {
+                byStage.put(stage, new LinkedHashMap<>(row));
+            }
+        }
+
+        int targetRank = educationRank(targetLevel);
+        byStage.entrySet().removeIf(e -> educationRank(e.getKey()) > targetRank);
+
+        Map<String, Object> target = byStage.get(targetLevel);
+        if (target == null) {
+            String school = preferredSchool != null && !preferredSchool.isBlank()
+                    ? preferredSchool
+                    : chooseSchool(npc.getOccupation(), toSchoolStage(targetLevel));
+            target = step(targetLevel, school, majorByOccupation(npc.getOccupation() == null ? "" : npc.getOccupation(), targetLevel));
+            byStage.put(targetLevel, target);
+        } else if (preferredSchool != null && !preferredSchool.isBlank()) {
+            target.put("school", preferredSchool);
+        }
+
+        List<Map<String, Object>> timeline = byStage.values().stream()
+                .sorted(Comparator.comparingInt(it -> educationRank(safePart(it.get("stage")))))
+                .toList();
+
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> step : timeline) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(safePart(step.get("stage"))).append("|")
+                    .append(safePart(step.get("school"))).append("|")
+                    .append(safePart(step.get("focus")));
+        }
+        npc.setEducationHistory(sb.toString());
+    }
+
+    private List<Map<String, Object>> parseEducationHistory(String educationHistory) {
+        List<Map<String, Object>> timeline = new ArrayList<>();
+        if (educationHistory == null || educationHistory.isBlank()) {
+            return timeline;
+        }
+        String[] lines = educationHistory.split("\n");
+        for (String line : lines) {
+            String[] parts = line.split("\\|", -1);
+            if (parts.length < 3) continue;
+            timeline.add(step(parts[0], parts[1], parts[2]));
+        }
+        return timeline;
+    }
+
+    private String safePart(Object val) {
+        if (val == null) return "";
+        return String.valueOf(val).replace("|", "/").replace("\n", " ").trim();
+    }
+
+    private int educationRank(String level) {
+        if (level == null) return 0;
+        return switch (level) {
+            case "高中" -> 1;
+            case "大专", "职业认证" -> 2;
+            case "本科" -> 3;
+            case "硕士" -> 4;
+            case "博士" -> 5;
+            default -> 1;
+        };
+    }
+
+    private String toSchoolStage(String level) {
+        if (level == null) return "highSchool";
+        return switch (level) {
+            case "高中" -> "highSchool";
+            case "大专" -> "college";
+            case "本科" -> "bachelor";
+            case "硕士" -> "master";
+            case "博士" -> "phd";
+            default -> "cert";
+        };
+    }
+
+    private AIService.GodModification enhanceGodModificationFromInstruction(AIService.GodModification mod, String instruction) {
+        if (mod == null) {
+            mod = AIService.GodModification.empty();
+        }
+        String parsedEducation = mod.educationLevel();
+        if (parsedEducation == null || parsedEducation.isBlank()) {
+            parsedEducation = detectEducationFromInstruction(instruction);
+        }
+        return new AIService.GodModification(
+                mod.currentLocation(),
+                mod.currentAction(),
+                mod.currentGoal(),
+                parsedEducation,
+                mod.money(),
+                mod.savings(),
+                mod.debt(),
+                mod.intelligence(),
+                mod.charisma(),
+                mod.skillLevel(),
+                mod.knowledgeLevel(),
+                mod.health(),
+                mod.reputation(),
+                mod.energy(),
+                mod.hunger(),
+                mod.happiness(),
+                mod.socialNeed(),
+                mod.workExperience()
+        );
+    }
+
+    private String detectEducationFromInstruction(String instruction) {
+        if (instruction == null || instruction.isBlank()) {
+            return null;
+        }
+        String text = instruction.trim();
+        if (text.matches(".*(博士|PhD|phd|doctor|Doctor).*")) return "博士";
+        if (text.matches(".*(硕士|研究生|Master|master).*")) return "硕士";
+        if (text.matches(".*(本科|学士|Bachelor|bachelor|211|985).*")) return "本科";
+        if (text.matches(".*(大专|专科|高职|职业院校).*")) return "大专";
+        if (text.matches(".*(职业认证|证书|认证).*")) return "职业认证";
+        if (text.matches(".*(高中|中学).*")) return "高中";
+        return null;
+    }
+
+    private String detectSchoolFromInstruction(String instruction) {
+        if (instruction == null || instruction.isBlank()) {
+            return null;
+        }
+        String text = instruction.trim();
+        if (text.matches(".*(麻省理工|MIT|mit).*")) return "麻省理工学院";
+        if (text.matches(".*(斯坦福|Stanford|stanford).*")) return "斯坦福大学";
+        if (text.matches(".*(哈佛|Harvard|harvard).*")) return "哈佛大学";
+        if (text.matches(".*(牛津|Oxford|oxford).*")) return "牛津大学";
+        if (text.matches(".*(剑桥|Cambridge|cambridge).*")) return "剑桥大学";
+        if (text.matches(".*(清华|tsinghua|Tsinghua).*")) return "清华大学";
+        if (text.matches(".*(北大|北京大学|Peking|peking).*")) return "北京大学";
+        if (text.matches(".*(复旦|Fudan|fudan).*")) return "复旦大学";
+        if (text.matches(".*(浙大|浙江大学|ZJU|zju).*")) return "浙江大学";
+        if (text.matches(".*(上交|上海交通大学|SJTU|sjtu).*")) return "上海交通大学";
+        return null;
+    }
+
+    private void applyCompensationOverridesFromInstruction(NPC npc, String instruction) {
+        if (instruction == null || instruction.isBlank()) {
+            return;
+        }
+        Double monthlyCash = extractAmount(instruction, "(月薪|月收入|现金部分|现金工资)");
+        Double monthlyOption = extractAmount(instruction, "(期权|股票|股权|RSU|rsu)");
+        Double annualIncome = extractAmount(instruction, "(年收入|年薪)");
+
+        NPCStats s = npc.getStats();
+        if (monthlyCash != null) {
+            s.setMonthlyCashIncome(Math.max(0, monthlyCash));
+        }
+        if (monthlyOption != null) {
+            s.setMonthlyStockOptionIncome(Math.max(0, monthlyOption));
+        }
+        if (annualIncome != null && monthlyCash == null) {
+            s.setMonthlyCashIncome(Math.max(0, annualIncome / 12.0));
+        }
+    }
+
+    private Double extractAmount(String instruction, String contextRegex) {
+        String text = instruction == null ? "" : instruction;
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(?:" + contextRegex + ")" + ".*?(?<num>\\d+(?:\\.\\d+)?)\\s*(?<unit>万元|万|千元|千|元)?");
+        java.util.regex.Matcher m = p.matcher(text);
+        if (!m.find()) {
+            return null;
+        }
+        String numberText = m.group("num");
+        if (numberText == null || numberText.isBlank()) {
+            return null;
+        }
+        double value;
+        try {
+            value = Double.parseDouble(numberText);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+        String unit = m.group("unit");
+        if (unit == null || unit.isBlank() || "元".equals(unit)) {
+            return value;
+        }
+        if ("万".equals(unit) || "万元".equals(unit)) {
+            return value * 10000;
+        }
+        if ("千".equals(unit) || "千元".equals(unit)) {
+            return value * 1000;
+        }
+        return value;
     }
 }

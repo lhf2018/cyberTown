@@ -1,284 +1,131 @@
-# 🏙️ 赛博小镇 - Cyber Town
+# 🏙️ Cyber Town（赛博小镇）
 
-一个由 **Spring AI** 驱动、**DeepSeek** 赋能的赛博朋克风格虚拟世界模拟系统。在这里，每个NPC都拥有独立的"人格"
-和记忆，能够自主决策、相互社交并与玩家进行智能对话。
+一个基于 Spring Boot + Spring AI 的 NPC 模拟系统：  
+NPC 具备可持久化状态、对话记忆、动态决策、上帝模式可编辑属性，以及新闻驱动行为变化。
 
----
+## 当前能力
 
-## ✨ 核心特性
+- AI / 普通两种初始化方式
+- NPC 每分钟心跳更新（状态衰减、行为决策、随机事件）
+- 流式对话（SSE）：运行页对话框按“输入中 -> 分片返回”
+- 对话记忆、对话影响（持续时间/强度）进入后续决策
+- 世界新闻抓取 + 新闻摘要注入决策上下文
+- 不定时“心里话气泡”
+- 上帝模式（自然语言）支持修改位置、目标、数值、学历、工资参数
+- 资产详情 / 学历详情 / 工资详情弹框
+- H2 文件库持久化（重启不丢失）
 
-- **🤖 AI驱动的NPC初始化** - 支持由大模型生成角色设定与数值属性
-- **🧠 智能决策系统** - NPC会根据短期状态 + 长期资产/能力做决策
-- **💬 自然语言对话** - 对话会基于当前动作、目标、财务、能力、个性动态回复
-- **🕹️ 上帝模式** - 支持自然语言直接修改NPC属性，并获得NPC变更反馈
-- **📣 世界广播面板** - 运行页顶部动态展示世界事件（当前为展示层）
-- **⏰ 动态时间系统** - 游戏时间以6倍现实速度流动，影响NPC的日常作息
-- **🎭 情感与关系模拟** - NPC拥有心情值，会建立并维护与其他NPC的关系网络
-- **🏢 场景化地点** - 科技公司、酒吧、黑市等不同地点塑造不同的交互氛围
-- **🔄 自动状态更新** - 每分钟自动更新所有NPC状态，世界持续"呼吸"与演进
-- **🖥️ 前端双页面流程** - 初始化页与运行页分离，流程更清晰
-- **🌐 完整REST API** - 提供开箱即用的API接口，便于前端集成与功能扩展
+## 技术栈
 
----
+- Java 17
+- Spring Boot 3.x
+- Spring AI（DeepSeek 兼容 OpenAI 接口）
+- H2（文件数据库）
 
-## 🚀 快速开始
+## 快速开始
 
-### 先决条件
+### 1) 准备环境
 
-- **JDK 17** 或更高版本
-- **Maven 3.6+**
-- **LLM API Key**（可在[DeepSeek官网](https://www.deepseek.com/)申请购买，1元100万token）
+- JDK 17+
+- Maven 3.6+
+- 可用的 DeepSeek API Key
 
-### 步骤 1：获取代码
+### 2) 配置
 
-```bash
-# 克隆项目到本地（请替换为实际的仓库地址）
-git clone <your-repo-url>
-cd cyber-town
-```
+编辑 `src/main/resources/application.yml` 中：
 
-### 步骤 2：配置API密钥
+- `spring.ai.openai.api-key`
+- `spring.ai.openai.base-url`
 
-**修改配置文件**
-编辑 `src/main/resources/application.yml`，将 `sk-your-key-here` 替换为你的密钥。
-
-### 步骤 3：启动项目
-
-在项目根目录运行：
+### 3) 启动
 
 ```bash
 mvn clean spring-boot:run
 ```
 
-或者在IDE（如IntelliJ IDEA）中直接运行 `CyberTownApplication.java`。
+### 4) 页面入口
 
-### 步骤 4：验证运行
+- 初始化页：`http://localhost:8080/`
+- 运行页：`http://localhost:8080/runtime.html`
+- AI 初始化页：`http://localhost:8080/ai-init.html`
+- H2 控制台：`http://localhost:8080/h2-console`
 
-启动成功后，控制台将显示类似日志：
+## 数据持久化说明
 
-```
-🚀 赛博小镇启动中...
-...
-🏙️ 赛博小镇已就绪！
-```
+当前已使用文件数据库持久化：
 
-### 步骤 5：页面入口与流程
+- 数据源：`jdbc:h2:file:./data/cybertown;AUTO_SERVER=TRUE`
+- 表结构策略：`ddl-auto: update`
+- 不再使用 `create-drop`
 
-- 初始化入口：`http://localhost:8080/`
-- 运行页面：`http://localhost:8080/runtime.html`
-- AI 初始化工具页（兼容保留）：`http://localhost:8080/ai-init.html`
+NPC 关键信息（包括对话记忆、学历历史、想法列表、资产/工资相关字段）会落库并在重启后保留。
 
-推荐流程：
-1. 打开初始化页（`/`）
-2. 执行普通初始化或 AI 初始化
-3. 初始化完成后自动跳转运行页
-4. 如需重新开局，在运行页点击“结束模拟并返回初始化”
----
+## 核心接口（常用）
 
-## 📡 API 接口速查
+### NPC 与状态
 
-项目启动后，以下API接口立即可用：
+- `GET /api/town/npcs` 获取全部 NPC
+- `GET /api/town/npc/{id}` 获取单个 NPC
+- `GET /api/town/npcs/status` 一次性状态
+- `GET /api/town/npcs/status/stream` 实时状态 SSE
 
-### 🎭 NPC 相关接口
+### 对话
 
-| 方法     | 端点                        | 说明              | 示例请求                                            |
-|:-------|:--------------------------|:----------------|:------------------------------------------------|
-| `GET`  | `/api/town/npcs`          | **获取所有NPC列表**   | `curl http://localhost:8080/api/town/npcs`      |
-| `GET`  | `/api/town/npc/{id}`      | **获取单个NPC详情**   | `curl http://localhost:8080/api/town/npc/npc-1` |
-| `POST` | `/api/town/npc/{id}/talk` | **与指定NPC对话**    | 基于当前状态+长期属性+个性进行回复 |
-| `POST` | `/api/town/npc/{id}/god-command` | **上帝模式修改NPC** | 自然语言修改属性，返回执行后NPC反馈 |
-| `GET` | `/api/town/npcs/status/stream` | **实时获取所有NPC状态** | 见下方详细示例                                         |
+- `POST /api/town/npc/{id}/talk`
+- `GET /api/town/npc/{id}/talk/stream?message=...`（流式）
 
-### ⏱️ 时间控制接口
+### 上帝模式
 
-| 方法     | 端点                                    | 说明          |
-|:-------|:--------------------------------------|:------------|
-| `POST` | `/api/town/time/pause`                | **暂停**游戏时间  |
-| `POST` | `/api/town/time/resume`               | **恢复**游戏时间  |
+- `POST /api/town/npc/{id}/god-command`
+  - 支持学历关键词归一化（专科/研究生/PhD 等）
+  - 支持工资相关自然语言覆盖（月薪/期权/年收入，元/千/万）
 
-### 🛠️ 系统管理接口
+### 世界信息
 
-| 方法     | 端点                           | 说明                      |
-|:-------|:-----------------------------|:------------------------|
-| `GET`  | `/api/town/status`           | 获取小镇运行**状态**            |
-| `POST` | `/api/town/init`             | 普通初始化（默认配置）             |
-| `POST` | `/api/town/init/ai`          | AI初始化（支持数量与清空参数）        |
-| `POST` | `/api/town/broadcast/status` | 手动广播当前NPC状态             |
-| `POST` | `/api/town/simulation/end`   | 结束模拟并清空NPC（用于重新初始化）     |
-| `GET`  | `/api/town/world/broadcast`  | 获取世界广播文案（展示层）          |
+- `GET /api/town/world/broadcast`
+- `GET /api/town/world/news`
+- `GET /api/town/npcs/thought-bubbles`
 
----
+### 详情面板
 
-## 🏗️ 项目架构
+- `GET /api/town/npc/{id}/profile/extended`
+  - assets：现金、储蓄、负债、净资产、风险
+  - educationTimeline：学历轨迹（含学校与方向）
+  - compensation：工资与期权展示数据
 
-```
-com.cybertown/
-├── CyberTownApplication.java          # 应用主入口
-├── config/
-│   └── AIConfig.java                  # AI提示词模板配置
-├── controller/
-│   └── TownController.java            # REST API控制器
-├── domain/                            # 核心领域模型
-│   ├── npc/
-│   │   ├── NPC.java                   # NPC主实体
-│   │   ├── NPCStats.java              # NPC属性（生命值、心情等）
-│   │   └── NPCAction.java             # 行为枚举
-│   └── world/
-│       ├── WorldState.java            # 游戏世界状态（单例）
-│       └── Location.java              # 地点实体
-├── repository/                        # 数据访问层
-│   ├── NPCRepository.java             # NPC数据接口
-│   └── LocationRepository.java        # 地点数据接口
-└── service/                           # 业务逻辑层
-    ├── AIService.java                 # 封装DeepSeek API调用
-    ├── TimeService.java               # 管理游戏时间流逝
-    └── NPCSimulatorService.java       # NPC状态模拟与更新
-```
-
-**数据流向**：`API请求` → `Controller` → `Service` → `AI/Repository` → `DB`
-
----
-
-## 👥 初始NPC居民介绍
-
-小镇初始化时会自动创建以下10位居民：
-
-| ID       | 姓名     | 职业    | 性格标签           | 初始位置  |
-|:---------|:-------|:------|:---------------|:------|
-| `npc-1`  | **杰克** | 程序员   | 内向、善良、逻辑性强     | 科技公司  |
-| `npc-2`  | **莉莉** | 设计师   | 外向、时尚、有艺术感     | 科技公司  |
-| `npc-3`  | **老王** | 酒吧老板  | 精明、务实、消息灵通     | 老王家酒吧 |
-| `npc-4`  | **小李** | 警察    | 正义感强、责任心重      | 警察局   |
-| `npc-5`  | **阿强** | 黑市商人  | 狡猾、但守信、利益至上    | 黑市    |
-| `npc-6`  | **小美** | 医生    | 温柔、体贴、富有同情心    | 诊所    |
-| `npc-7`  | **大壮** | 保安    | 强壮、忠诚、头脑简单     | 大厦门口  |
-| `npc-8`  | **眼镜** | 黑客    | 技术天才、社交障碍、崇尚自由 | 网络空间  |
-| `npc-9`  | **红姐** | 舞者    | 魅力四射、身世神秘、善于交际 | 霓虹酒吧  |
-| `npc-10` | **老陈** | 出租车司机 | 见多识广、爱讲故事、老江湖  | 街道    |
-
----
-
-## ⚙️ 配置详解
-
-主要配置文件位于 `src/main/resources/application.yml`:
-
-```yaml
-# DeepSeek AI 配置
-spring:
-  ai:
-    openai:
-      api-key: ${DEEPSEEK_API_KEY:sk-your-key-here} # 从环境变量读取密钥
-      base-url: https://api.deepseek.com # 关键：指向DeepSeek端点
-      chat:
-        options:
-          model: deepseek-chat   # 使用的模型
-          temperature: 0.7       # 创造性（0-1，越高回答越随机）
-          max-tokens: 500        # 回答的最大长度
-
-  # H2 内存数据库（开发用）
-  datasource:
-    url: jdbc:h2:mem:cybertown
-    username: sa
-
-# 游戏参数
-cybertown:
-  time-scale: 6.0 # 时间流速：现实1秒 = 游戏内6秒
-```
-
-**关键配置项说明**：
-
-- `base-url`: **必须正确设置为** `https://api.deepseek.com`
-- `temperature`: 可调整为 `0.3`（更稳定）或 `0.9`（更有创意）
-- `time-scale`: 调大可加快游戏进程
-
----
-
-## 🔧 开发与调试
-
-### 查看数据库内容
-
-1. 应用启动后，访问 `http://localhost:8080/h2-console`
-2. 登录信息：
-    - **JDBC URL**: `jdbc:h2:mem:cybertown`
-    - **User Name**: `sa`
-    - **Password**: (留空)
-3. 连接后可查看 `NPCS`、`LOCATIONS` 等表。
-
-### 调整日志输出
-
-编辑 `application.yml`，修改以下日志级别以获得更详细的信息：
-
-```yaml
-logging:
-  level:
-    com.cybertown: DEBUG # 查看业务逻辑详细日志
-    org.hibernate.SQL: DEBUG # 查看所有执行的SQL语句
-```
-
-## 🚀 进阶开发与扩展
-
-### 增加新的NPC
-
-在 `NPCSimulatorService.initializeNPCs()` 方法中，参照现有格式添加新的NPC数据即可。
-
-### 调整 AI 初始化字段
-
-AI 初始化入口会读取以下字段：
-- 角色字段：`name`、`occupation`、`personality`、`location`、`currentAction`、`currentGoal`
-- 属性字段：`energy`、`hunger`、`happiness`、`socialNeed`、`money`、`intelligence`、`charisma`
-- 长期字段：`skillLevel`、`knowledgeLevel`、`health`、`reputation`、`savings`、`debt`、`workExperience`、`educationLevel`
-
-如需扩展角色维度，可从 `AIService.generateNPCBlueprints()` 和 `NPCSimulatorService.createFromBlueprint()` 开始。
-
-### 上帝模式示例
-
-请求：
+## 上帝模式示例
 
 ```json
-POST /api/town/npc/npc-ai-xxxx/god-command
+POST /api/town/npc/npc-1/god-command
 {
-  "instruction": "把他现金改成20000，负债清零，目标改成三个月内买房，技能提升到85"
+  "instruction": "把学历改成麻省理工的博士，月薪改成3万元，期权改成5000元，目标改成一年内做出高可用系统"
 }
 ```
 
-返回（节选）：
+## 已知规则（当前实现）
 
-```json
-{
-  "message": "上帝指令执行完成",
-  "npcName": "夜枭",
-  "npcReply": "我刚把债务从终端里抹干净了，现在准备冲高技能去接更贵的单。"
-}
+- 程序员岗位公司与学历有约束（本科及以上才会分配到头部大厂池）
+- 期权不是所有岗位都有（受岗位/学历/公司条件约束）
+- 学历详情为持久化字段，支持在上帝模式下增量修改
+
+## 项目结构（简化）
+
+```text
+src/main/java/com/cybertown/
+  controller/       # API 与页面数据聚合
+  service/          # AI、模拟、新闻等核心逻辑
+  domain/npc/       # NPC 与属性实体
+  domain/world/     # 世界状态
+  repository/       # JPA Repository
+src/main/resources/
+  static/           # 前端页面（index/runtime/ai-init）
+  application.yml
+docs/wiki/
+  README.md
+  iteration-log.md
 ```
 
-### 增加新的地点类型
+## 本地 Wiki
 
-1. 在 `Location` 实体中扩展地点属性。
-2. 在 `getInitialLocation()` 方法中为相应职业配置新地点。
-3. NPC的AI决策会自动将新地点纳入考虑范围。
-
----
-
-## 🙏 致谢
-
-- 感谢 [Spring AI](https://spring.io/projects/spring-ai) 项目提供了简洁强大的AI集成能力。
-- 感谢 [DeepSeek](https://www.deepseek.com/) 提供优质、高效的AI模型服务。
-- 感谢所有开源社区的建设者。
----
-
-**踏入霓虹闪烁的赛博街道，开始你的冒险吧！** ✨
-
-> 如有问题，请查看日志或提交Issue。欢迎提出改进建议！
-
-## 📘 本地 Wiki
-
-- Wiki 索引：`docs/wiki/README.md`
+- 索引：`docs/wiki/README.md`
 - 迭代记录：`docs/wiki/iteration-log.md`
-
-## 计划后面做的
-> 1. 对话干预决策
-> 2. 初始化更随机
-> 3. 世界信息服务
-> 4. web服务、最新新闻来影响决策
-> 5. 更多的事件、正向、负向或犯罪系统、随机天气等
-> 6. 前端页面

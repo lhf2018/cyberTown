@@ -116,6 +116,15 @@ public class NPCSimulatorService {
     private boolean updateSingleNPC(NPC npc) {
         boolean hasChanges = false;
 
+        // 0. 清理过期的对话影响
+        if (npc.getDialogueInfluenceExpiresAt() != null
+                && LocalDateTime.now().isAfter(npc.getDialogueInfluenceExpiresAt())) {
+            npc.setDialogueInfluence(null);
+            npc.setDialogueInfluenceWeight(0);
+            npc.setDialogueInfluenceExpiresAt(null);
+            hasChanges = true;
+        }
+
         // 1. 检查是否需要跳过更新（最近刚更新过）
         if (shouldSkipUpdate(npc)) {
             log.trace("跳过NPC {} 的更新，更新间隔太短", npc.getName());
@@ -681,6 +690,11 @@ public class NPCSimulatorService {
                 .money(500 + random.nextInt(1500))        // 500-2000
                 .skillLevel(30 + random.nextInt(40))
                 .knowledgeLevel(35 + random.nextInt(45))
+                .technicalKnowledge(30 + random.nextInt(45))
+                .businessKnowledge(20 + random.nextInt(45))
+                .socialKnowledge(30 + random.nextInt(45))
+                .practicalSkill(30 + random.nextInt(45))
+                .creativeSkill(25 + random.nextInt(50))
                 .health(60 + random.nextInt(35))
                 .reputation(10 + random.nextInt(30))
                 .savings(100 + random.nextInt(600))
@@ -689,6 +703,7 @@ public class NPCSimulatorService {
                 .educationLevel(randomPick("高中", "大专", "本科", "职业认证"))
                 .build();
         npc.setStats(stats);
+        npc.setEmployer(getEmployerByOccupationAndEducation(occupation, stats.getEducationLevel()));
 
         npcRepository.save(npc);
         log.info("创建NPC: {} - {} (@{})，心情: {}，能量: {}，金钱: {}", name, occupation, location, stats.getHappiness(), stats.getEnergy(), stats.getMoney());
@@ -714,6 +729,11 @@ public class NPCSimulatorService {
                 .charisma(blueprint.charisma())
                 .skillLevel(blueprint.skillLevel())
                 .knowledgeLevel(blueprint.knowledgeLevel())
+                .technicalKnowledge(blueprint.technicalKnowledge())
+                .businessKnowledge(blueprint.businessKnowledge())
+                .socialKnowledge(blueprint.socialKnowledge())
+                .practicalSkill(blueprint.practicalSkill())
+                .creativeSkill(blueprint.creativeSkill())
                 .health(blueprint.health())
                 .reputation(blueprint.reputation())
                 .savings(blueprint.savings())
@@ -722,6 +742,12 @@ public class NPCSimulatorService {
                 .educationLevel(blueprint.educationLevel())
                 .build();
         npc.setStats(stats);
+        String normalizedEmployer = normalizeEmployerByEducation(
+                blueprint.occupation(),
+                stats.getEducationLevel(),
+                blueprint.employer()
+        );
+        npc.setEmployer(normalizedEmployer);
 
         NPC saved = npcRepository.save(npc);
         log.info("AI创建NPC: {} - {} (@{})", saved.getName(), saved.getOccupation(), saved.getCurrentLocation());
@@ -764,6 +790,43 @@ public class NPCSimulatorService {
 
     private String randomPick(String... options) {
         return options[random.nextInt(options.length)];
+    }
+
+    private String getEmployerByOccupationAndEducation(String occupation, String educationLevel) {
+        if (occupation == null) {
+            return "自由职业";
+        }
+        String edu = educationLevel == null ? "高中" : educationLevel;
+        return switch (occupation) {
+            case "程序员" -> isAtLeastBachelor(edu)
+                    ? randomPick("阿里巴巴", "腾讯云", "字节跳动")
+                    : randomPick("本地软件外包公司", "中小型互联网公司", "创业工作室");
+            case "设计师" -> randomPick("米哈游设计中心", "字节创意工作室", "网易视觉实验室");
+            case "警察" -> "赛博市警署";
+            case "医生" -> randomPick("新纪元医疗集团", "赛博诊所联合体");
+            case "酒吧老板", "舞者" -> "霓虹夜场集团";
+            case "黑市商人", "黑客" -> "自由接单";
+            case "保安" -> "赛博安保公司";
+            case "出租车司机" -> "霓虹出行平台";
+            default -> "自由职业";
+        };
+    }
+
+    private String normalizeEmployerByEducation(String occupation, String educationLevel, String employer) {
+        String generated = getEmployerByOccupationAndEducation(occupation, educationLevel);
+        if (employer == null || employer.isBlank()) {
+            return generated;
+        }
+        boolean topTech = employer.matches(".*(阿里巴巴|腾讯云|字节跳动).*");
+        if (topTech && !isAtLeastBachelor(educationLevel)) {
+            return generated;
+        }
+        return employer;
+    }
+
+    private boolean isAtLeastBachelor(String educationLevel) {
+        if (educationLevel == null) return false;
+        return educationLevel.matches("本科|硕士|博士");
     }
 
     // ======================== 公开方法（供Controller调用） ========================

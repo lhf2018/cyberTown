@@ -22,6 +22,7 @@ public class NPC {
     // 基本信息
     private String name;         // 姓名：杰克、莉莉
     private String occupation;   // 职业：程序员、警察
+    private String employer;     // 公司/机构：如阿里巴巴、赛博市警署
     private String personality;  // 性格：内向、外向
 
     // 当前状态
@@ -37,7 +38,23 @@ public class NPC {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "npc_thoughts", joinColumns = @JoinColumn(name = "npc_id"))
+    @Column(name = "thought", length = 1000)
+    @OrderColumn(name = "thought_order")
     private List<String> currentThoughts = new ArrayList<>();
+
+    @Column(length = 4000)
+    private String dialogueMemory;
+
+    @Column(length = 4000)
+    private String educationHistory;
+
+    // 对话影响：记录最近一次玩家干预对NPC决策的影响
+    @Column(length = 1000)
+    private String dialogueInfluence;
+    private LocalDateTime dialogueInfluenceExpiresAt;
+    private int dialogueInfluenceWeight;
 
     // 创建时自动设置时间
     @PrePersist
@@ -60,5 +77,12 @@ public class NPC {
     // 实用方法：检查是否累了
     public boolean isTired() {
         return stats.getEnergy() < 30;
+    }
+
+    public boolean hasActiveDialogueInfluence() {
+        return dialogueInfluence != null
+                && !dialogueInfluence.isBlank()
+                && dialogueInfluenceExpiresAt != null
+                && LocalDateTime.now().isBefore(dialogueInfluenceExpiresAt);
     }
 }

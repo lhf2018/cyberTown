@@ -9,6 +9,7 @@ import org.springframework.ai.chat.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,69 @@ public class AIService {
         }
     }
 
+    /**
+     * 评估玩家对话对NPC后续决策的影响。
+     * 影响时长由NPC（模型）在当前状态下自行决定。
+     */
+    public DialogueInfluence evaluateDialogueInfluence(NPC npc, String playerMessage) {
+        String prompt = """
+                你现在扮演NPC“%s”（职业：%s，性格：%s）。
+                玩家刚对你说：%s
+
+                你当前状态：
+                - 位置：%s
+                - 动作：%s
+                - 目标：%s
+                - 心情：%d
+                - 能量：%d
+                - 饥饿：%d
+                - 社交需求：%d
+
+                请判断这句话是否会影响你接下来一段时间的行为决策，并输出JSON：
+                {
+                  "summary": "一句话描述影响，例如：玩家建议我先去补给并保持低调",
+                  "durationMinutes": 影响持续分钟数(0-180，0表示不影响),
+                  "weight": 影响强度(0-100，越高越可能改变短期决策)
+                }
+
+                规则：
+                1) 只输出JSON，不要解释。
+                2) durationMinutes 和 weight 必须是整数。
+                3) 如果玩家话语与你当前处境冲突或你不认同，可以给较低时长和强度。
+                """.formatted(
+                npc.getName(),
+                npc.getOccupation(),
+                npc.getPersonality(),
+                safeText(playerMessage),
+                safeText(npc.getCurrentLocation()),
+                safeText(npc.getCurrentAction()),
+                safeText(npc.getCurrentGoal()),
+                npc.getStats().getHappiness(),
+                npc.getStats().getEnergy(),
+                npc.getStats().getHunger(),
+                npc.getStats().getSocialNeed()
+        );
+
+        try {
+            String raw = chatClient.call(prompt);
+            JsonNode node = objectMapper.readTree(stripMarkdownFence(raw));
+            if (!node.isObject()) {
+                return DialogueInfluence.none();
+            }
+
+            String summary = sanitize(node.path("summary").asText(""));
+            int durationMinutes = clamp(node.path("durationMinutes").asInt(0), 0, 180);
+            int weight = clamp(node.path("weight").asInt(0), 0, 100);
+            if (summary.isBlank() || durationMinutes <= 0 || weight <= 0) {
+                return DialogueInfluence.none();
+            }
+            return new DialogueInfluence(summary, durationMinutes, weight, LocalDateTime.now().plusMinutes(durationMinutes));
+        } catch (Exception e) {
+            log.warn("对话影响评估失败，降级为无影响: {}", e.getMessage());
+            return DialogueInfluence.none();
+        }
+    }
+
     private String buildRichDialoguePrompt(NPC npc, String playerMessage) {
         String thoughts = "无";
         if (npc.getCurrentThoughts() != null && !npc.getCurrentThoughts().isEmpty()) {
@@ -54,6 +118,7 @@ public class AIService {
                 【角色设定】
                 - 姓名：%s
                 - 职业：%s
+                - 公司/机构：%s
                 - 性格：%s
 
                 【当前状态】
@@ -83,15 +148,21 @@ public class AIService {
                 - 工作经验(月)：%d
 
                 玩家对你说：%s
+                历史对话（最近几轮）：%s
 
                 【回复要求】
                 1) 用第一人称，保持该NPC的个性和职业语气。
-                2) 回复 1~3 句话，简短但有趣，带一点赛博朋克风格。
+                2) 回复 1~2 句话，简短但有趣，带一点赛博朋克风格。
                 3) 必须体现当前状态和至少一个属性信息（如钱、负债、健康、技能等）。
                 4) 不要跳出角色，不要解释你是AI，不要写旁白标签。
+                5) 总长度控制在80字以内。
+                6) 玩家是“上帝/管理者”：整体语气需尊重、礼貌，可用“您”称呼。
+                7) 尊重不等于失去个性：仍需体现该NPC性格（内向者更克制，外向者更热情，强势者更直率但不失礼）。
+                8) 当玩家要求与你当前状态冲突时，应先表达尊重，再给出基于自身处境的真实回应。
                 """.formatted(
                 npc.getName(),
                 npc.getOccupation(),
+                safeText(npc.getEmployer()),
                 npc.getPersonality(),
                 safeText(npc.getCurrentLocation()),
                 safeText(npc.getCurrentAction()),
@@ -113,8 +184,27 @@ public class AIService {
                 npc.getStats().getReputation(),
                 safeText(npc.getStats().getEducationLevel()),
                 npc.getStats().getWorkExperience(),
-                safeText(playerMessage)
+                safeText(playerMessage),
+                buildDialogueContext(npc)
         );
+    }
+
+    private String buildDialogueContext(NPC npc) {
+        if (npc.getDialogueMemory() == null || npc.getDialogueMemory().isBlank()) {
+            return "无";
+        }
+        String[] lines = npc.getDialogueMemory().split("\n");
+        int keep = Math.min(4, lines.length);
+        StringBuilder sb = new StringBuilder();
+        for (int i = lines.length - keep; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.length() > 120) {
+                line = line.substring(0, 120) + "...";
+            }
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(line);
+        }
+        return sb.toString();
     }
 
     private String safeText(String value) {
@@ -151,6 +241,7 @@ public class AIService {
                 2) 顶层是数组，每个元素包含以下字段：
                    - name: 中文名
                    - occupation: 职业
+                   - employer: 公司或机构
                    - personality: 一句话性格描述
                    - location: 初始地点
                    - currentAction: 初始动作
@@ -164,6 +255,11 @@ public class AIService {
                    - charisma: 魅力(0-100)
                    - skillLevel: 职业技能(0-100)
                    - knowledgeLevel: 知识储备(0-100)
+                   - technicalKnowledge: 技术知识(0-100)
+                   - businessKnowledge: 商业知识(0-100)
+                   - socialKnowledge: 人际知识(0-100)
+                   - practicalSkill: 实操技能(0-100)
+                   - creativeSkill: 创造技能(0-100)
                    - health: 健康水平(0-100)
                    - reputation: 社会声望(0-100)
                    - savings: 储蓄(>=0)
@@ -204,6 +300,7 @@ public class AIService {
         }
         String name = sanitize(item.path("name").asText(""));
         String occupation = sanitize(item.path("occupation").asText(""));
+        String employer = sanitize(item.path("employer").asText(""));
         String personality = sanitize(item.path("personality").asText(""));
         String location = sanitize(item.path("location").asText(""));
         String currentAction = sanitize(item.path("currentAction").asText(""));
@@ -217,6 +314,11 @@ public class AIService {
         int charisma = clamp(item.path("charisma").asInt(50), 0, 100);
         int skillLevel = clamp(item.path("skillLevel").asInt(45), 0, 100);
         int knowledgeLevel = clamp(item.path("knowledgeLevel").asInt(50), 0, 100);
+        int technicalKnowledge = clamp(item.path("technicalKnowledge").asInt(knowledgeLevel), 0, 100);
+        int businessKnowledge = clamp(item.path("businessKnowledge").asInt(40), 0, 100);
+        int socialKnowledge = clamp(item.path("socialKnowledge").asInt(45), 0, 100);
+        int practicalSkill = clamp(item.path("practicalSkill").asInt(skillLevel), 0, 100);
+        int creativeSkill = clamp(item.path("creativeSkill").asInt(40), 0, 100);
         int health = clamp(item.path("health").asInt(75), 0, 100);
         int reputation = clamp(item.path("reputation").asInt(30), 0, 100);
         double savings = clamp(item.path("savings").asDouble(200), 0, 1_000_000);
@@ -231,9 +333,10 @@ public class AIService {
         if (location.isBlank()) location = "霓虹街道";
         if (currentAction.isBlank()) currentAction = "活动中";
         if (currentGoal.isBlank()) currentGoal = "适应城市节奏";
-        return new NPCBlueprint(name, occupation, personality, location, currentAction, currentGoal,
+        return new NPCBlueprint(name, occupation, employer, personality, location, currentAction, currentGoal,
                 energy, hunger, happiness, socialNeed, money, intelligence, charisma,
-                skillLevel, knowledgeLevel, health, reputation, savings, debt, workExperience, educationLevel);
+                skillLevel, knowledgeLevel, technicalKnowledge, businessKnowledge, socialKnowledge, practicalSkill, creativeSkill,
+                health, reputation, savings, debt, workExperience, educationLevel);
     }
 
     private String sanitize(String value) {
@@ -274,6 +377,7 @@ public class AIService {
             list.add(new NPCBlueprint(
                     names[random.nextInt(names.length)] + (i + 1),
                     occupations[random.nextInt(occupations.length)],
+                    randomPick("阿里巴巴", "腾讯云", "字节跳动", "赛博市政厅", "新纪元医疗", "霓虹夜场集团"),
                     personalities[random.nextInt(personalities.length)],
                     locations[random.nextInt(locations.length)],
                     actions[random.nextInt(actions.length)],
@@ -285,6 +389,11 @@ public class AIService {
                     300 + random.nextInt(2701),
                     35 + random.nextInt(66),
                     30 + random.nextInt(71),
+                    30 + random.nextInt(61),
+                    35 + random.nextInt(61),
+                    35 + random.nextInt(61),
+                    25 + random.nextInt(61),
+                    30 + random.nextInt(61),
                     30 + random.nextInt(61),
                     35 + random.nextInt(61),
                     50 + random.nextInt(46),
@@ -450,9 +559,44 @@ public class AIService {
         }
     }
 
+    public String generateThoughtBubble(NPC npc, String newsHeadline) {
+        try {
+            String prompt = """
+                    你是%s（职业：%s，公司：%s，性格：%s）。
+                    当前动作：%s
+                    当前目标：%s
+                    当前状态：能量%d，饥饿%d，心情%d，社交需求%d
+                    最近对话上下文：%s
+                    最近新闻：%s
+
+                    请生成一句“内心独白气泡文案”（10~28字，中文，口语化，带一点赛博风）。
+                    要求必须融合：当前状态 + 最近行为/目标 + 新闻影响 + 对话痕迹（若有）。
+                    只输出一句话，不要解释，不要引号。
+                    """.formatted(
+                    npc.getName(),
+                    npc.getOccupation(),
+                    safeText(npc.getEmployer()),
+                    npc.getPersonality(),
+                    safeText(npc.getCurrentAction()),
+                    safeText(npc.getCurrentGoal()),
+                    npc.getStats().getEnergy(),
+                    npc.getStats().getHunger(),
+                    npc.getStats().getHappiness(),
+                    npc.getStats().getSocialNeed(),
+                    safeText(npc.getDialogueMemory()),
+                    safeText(newsHeadline)
+            );
+            String response = chatClient.call(prompt);
+            return sanitize(response);
+        } catch (Exception e) {
+            return npc.getName() + " 想：先稳住节奏，再看今晚新闻风向。";
+        }
+    }
+
     public record NPCBlueprint(
             String name,
             String occupation,
+            String employer,
             String personality,
             String location,
             String currentAction,
@@ -466,6 +610,11 @@ public class AIService {
             int charisma,
             int skillLevel,
             int knowledgeLevel,
+            int technicalKnowledge,
+            int businessKnowledge,
+            int socialKnowledge,
+            int practicalSkill,
+            int creativeSkill,
             int health,
             int reputation,
             double savings,
@@ -538,6 +687,21 @@ public class AIService {
         private static Integer integer(JsonNode node, String field) {
             JsonNode v = node.get(field);
             return (v == null || v.isNull()) ? null : v.asInt();
+        }
+    }
+
+    public record DialogueInfluence(
+            String summary,
+            int durationMinutes,
+            int weight,
+            LocalDateTime expiresAt
+    ) {
+        public static DialogueInfluence none() {
+            return new DialogueInfluence(null, 0, 0, null);
+        }
+
+        public boolean active() {
+            return summary != null && !summary.isBlank() && durationMinutes > 0 && weight > 0 && expiresAt != null;
         }
     }
 }

@@ -58,6 +58,15 @@ public interface AIDecisionAssistant {
                     
                     当前想法（最近想法）：
                     {{recentThoughts}}
+
+                    玩家对话影响（可能为空）：
+                    - 是否生效：{{dialogueInfluenceActive}}
+                    - 影响内容：{{dialogueInfluence}}
+                    - 影响强度：{{dialogueInfluenceWeight}}
+                    - 预计失效时间：{{dialogueInfluenceExpiresAt}}
+
+                    世界新闻摘要（会影响社会氛围与机会风险）：
+                    {{globalNewsBrief}}
                     
                     环境信息：
                     - 当前时间：{{hour}}:00 ({{timeOfDay}})

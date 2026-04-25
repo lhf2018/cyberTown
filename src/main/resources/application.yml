@@ -19,7 +19,7 @@ spring:
   # ========== 数据库配置 ==========
   datasource:
     # H2内存数据库URL：jdbc:h2:mem:数据库名
-    url: jdbc:h2:mem:cybertown
+    url: jdbc:h2:file:./data/cybertown;AUTO_SERVER=TRUE
     driver-class-name: org.h2.Driver  # H2数据库驱动
     username: sa                      # 默认用户名
     password: ""                      # 空密码
@@ -28,11 +28,11 @@ spring:
   jpa:
     hibernate:
       # 启动时自动创建/更新表结构
-      ddl-auto: create-drop  # create-drop：启动时创建表，关闭时删除（开发用）
-    show-sql: true           # 在控制台显示SQL语句，便于调试
+      ddl-auto: update  # update：保留历史数据并自动更新表结构
+    show-sql: false          # 关闭SQL打印
     properties:
       hibernate:
-        format_sql: true     # 格式化SQL语句，便于阅读
+        format_sql: false
 
   # ========== H2数据库控制台配置 ==========
   h2:
@@ -49,3 +49,5 @@ logging:
   level:
     com.cybertown: DEBUG        # 自定义包的日志级别为DEBUG（最详细）
     org.springframework.ai: INFO # Spring AI包的日志级别为INFO
+    org.hibernate.SQL: OFF
+    org.hibernate.orm.jdbc.bind: OFF

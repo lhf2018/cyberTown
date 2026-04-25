@@ -2,6 +2,7 @@ package com.cybertown.graph;
 
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.world.WorldState;
+import com.cybertown.service.NewsService;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -26,6 +27,7 @@ public class NPCBehaviorGraph {
 
     private final NPCDecisionTools decisionTools;
     private final ChatLanguageModel chatLanguageModel;
+    private final NewsService newsService;
 
     private AIDecisionAssistant aiDecisionAssistant;
 
@@ -96,6 +98,11 @@ public class NPCBehaviorGraph {
                             educationLevel=%s
                             workExperience=%d
                             recentThoughts=%s
+                            dialogueInfluenceActive=%s
+                            dialogueInfluence=%s
+                            dialogueInfluenceWeight=%d
+                            dialogueInfluenceExpiresAt=%s
+                            globalNewsBrief=%s
                             hour=%d
                             timeOfDay=%s
                             currentTime=%s
@@ -118,6 +125,11 @@ public class NPCBehaviorGraph {
                     npc.getStats().getEducationLevel(),
                     npc.getStats().getWorkExperience(),
                     recentThoughts,
+                    npc.hasActiveDialogueInfluence(),
+                    npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluence() : "无",
+                    npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceWeight() : 0,
+                    npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceExpiresAt() : "无",
+                    newsService.getNewsBrief(),
                     world.getGameTime().getHour(),
                     world.getTimeOfDay(),
                     world.getGameTime().toString()
@@ -251,6 +263,11 @@ public class NPCBehaviorGraph {
         log.info("⚙️ 规则引擎决策: {}", npc.getName());
 
         try {
+            if (npc.hasActiveDialogueInfluence() && npc.getDialogueInfluenceWeight() >= 60) {
+                String influence = npc.getDialogueInfluence().trim();
+                return "优先响应玩家建议：" + influence;
+            }
+
             // 使用原有的决策逻辑
             String npcName = npc.getName();
             int energy = npc.getStats().getEnergy();
