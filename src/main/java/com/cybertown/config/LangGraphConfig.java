@@ -39,9 +39,9 @@ public class LangGraphConfig {
                     .baseUrl(openaiBaseUrl)
                     .modelName("deepseek-chat")
                     .temperature(0.7)
-                    .maxTokens(500)
-                    .logRequests(true)
-                    .logResponses(true)
+                    .maxTokens(1200)
+                    .logRequests(false)
+                    .logResponses(false)
                     .build();
         } catch (Exception e) {
             log.error("创建OpenAI聊天模型失败", e);

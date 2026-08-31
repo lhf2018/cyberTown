@@ -6,6 +6,8 @@ import com.cybertown.domain.world.WorldState;
 import com.cybertown.graph.NPCBehaviorGraph;
 import com.cybertown.graph.NPCDecisionTools;
 import com.cybertown.repository.NPCRepository;
+import com.cybertown.repository.RelationshipRepository;
+import com.cybertown.repository.TownEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,6 +34,13 @@ public class NPCSimulatorService {
     private final WorldService worldService;         // 世界信息服务
     private final NPCBehaviorGraph npcBehaviorGraph;
     private final AIService aiService;
+    private final SocialService socialService;
+    private final WorldEventService worldEventService;
+    private final LifeEventService lifeEventService;
+    private final TownEventService townEventService;
+    private final ModeService modeService;
+    private final RelationshipRepository relationshipRepository;
+    private final TownEventRepository townEventRepository;
 
     private final Random random = new Random();
 
@@ -59,6 +68,13 @@ public class NPCSimulatorService {
 
         long startTime = System.currentTimeMillis();
         List<NPC> npcs = npcRepository.findAll();
+        // 顺手清掉历史异常理由，避免页面长期展示旧堆栈
+        for (NPC npc : npcs) {
+            if (isToxicDecisionReason(npc.getLastDecisionReason())) {
+                npc.setLastDecisionReason("规则引擎决策（AI暂不可用）");
+                npcRepository.save(npc);
+            }
+        }
         int updatedCount = 0;
 
         log.debug("开始心跳更新，共{}个NPC", npcs.size());
@@ -72,6 +88,22 @@ public class NPCSimulatorService {
                 log.error("更新NPC失败: {}，错误: {}", npc.getName(), e.getMessage(), e);
                 // 继续处理其他NPC，不中断整个流程
             }
+        }
+
+        try {
+            worldEventService.tick();
+        } catch (Exception e) {
+            log.warn("世界事件处理失败: {}", e.getMessage());
+        }
+        try {
+            socialService.processCoLocatedMeetings();
+        } catch (Exception e) {
+            log.warn("社交处理失败: {}", e.getMessage());
+        }
+        try {
+            lifeEventService.maybeTrigger();
+        } catch (Exception e) {
+            log.warn("人生事件处理失败: {}", e.getMessage());
         }
 
         long elapsedTime = System.currentTimeMillis() - startTime;
@@ -172,9 +204,11 @@ public class NPCSimulatorService {
         NPCStats stats = npc.getStats();
         boolean changed = false;
 
-        // 能量减少（随时间流逝）
+        // 能量减少（随时间流逝，暴雨等世界事件会加快消耗）
         int oldEnergy = stats.getEnergy();
-        stats.setEnergy(Math.max(0, stats.getEnergy() - ENERGY_DECREASE_PER_MINUTE));
+        int drain = Math.max(1, (int) Math.round(ENERGY_DECREASE_PER_MINUTE
+                * worldEventService.getModifiers().getEnergyDrainMultiplier()));
+        stats.setEnergy(Math.max(0, stats.getEnergy() - drain));
         if (oldEnergy != stats.getEnergy()) changed = true;
 
         // 饥饿增加（随时间流逝）
@@ -304,6 +338,9 @@ public class NPCSimulatorService {
     private void apply(NPC npc, NPCDecisionTools.DecisionResult result) {
         // 设置新动作
         npc.setCurrentAction(result.getDecision());
+        npc.setLastDecision(result.getDecision());
+        npc.setLastDecisionReason(sanitizeDecisionReason(result.getReason()));
+        npc.setLastDecisionAt(LocalDateTime.now());
 
         // 更新位置（如果决策中包含位置信息）
         updateLocationFromDecision(npc, result.getDecision());
@@ -315,7 +352,27 @@ public class NPCSimulatorService {
         npc.setUpdatedAt(LocalDateTime.now());
 
         //记录新想法
-        npc.getCurrentThoughts().add(result.getNewThought());
+        if (result.getNewThought() != null && !result.getNewThought().isBlank()) {
+            npc.getCurrentThoughts().add(result.getNewThought());
+        }
+
+        // 抽样写入决策事件，避免刷屏
+        if (random.nextInt(100) < 25) {
+            townEventService.record(
+                    "DECISION",
+                    npc.getName() + "：" + shorten(result.getDecision(), 40),
+                    result.getReason(),
+                    npc.getId(),
+                    result.getSource() == null ? "AI" : result.getSource(),
+                    6
+            );
+        }
+    }
+
+    private static String shorten(String s, int max) {
+        if (s == null) return "";
+        String t = s.trim();
+        return t.length() <= max ? t : t.substring(0, max - 1) + "…";
     }
 
     /**
@@ -385,12 +442,13 @@ public class NPCSimulatorService {
             maybePromoteEducation(stats);
         }
 
-        // 投资理财：有波动，不直接影响世界事件
+        // 投资理财：受世界行情权重影响
         if (lowerDecision.matches(".*(投资|理财|交易|炒股).*")) {
             double stake = Math.min(stats.getMoney() * 0.2, 300 + random.nextInt(400));
             if (stake > 0) {
                 stats.setMoney(stats.getMoney() - stake);
-                double ratio = (random.nextDouble() * 0.6) - 0.2; // -20% ~ +40%
+                double bias = worldEventService.getModifiers().getInvestReturnBias();
+                double ratio = (random.nextDouble() * 0.6) - 0.2 + bias; // 基础 -20%~+40% + 世界偏移
                 double result = stake * (1 + ratio);
                 stats.setMoney(stats.getMoney() + Math.max(0, result));
                 if (result >= stake) {
@@ -502,12 +560,18 @@ public class NPCSimulatorService {
     private void triggerRandomEvent(NPC npc) {
         int eventType = random.nextInt(10);
         NPCStats stats = npc.getStats();
+        String title = null;
+        String detail = null;
+        String severity = "FLAVOR";
 
         switch (eventType) {
             case 0: // 捡到钱
                 double foundMoney = 10 + random.nextInt(100);
                 stats.setMoney(stats.getMoney() + foundMoney);
                 npc.setCurrentAction("捡到" + foundMoney + "信用点");
+                title = npc.getName() + " 捡到信用点";
+                detail = npc.getName() + " 捡到 " + foundMoney + " 信用点";
+                severity = "WINDFALL";
                 log.info("NPC {} 捡到 {} 信用点", npc.getName(), foundMoney);
                 break;
 
@@ -515,24 +579,35 @@ public class NPCSimulatorService {
                 stats.setHappiness(Math.min(100, stats.getHappiness() + 20));
                 stats.setSocialNeed(Math.max(0, stats.getSocialNeed() - 30));
                 npc.setCurrentAction("偶遇老朋友聊天");
+                title = npc.getName() + " 偶遇老友";
+                detail = npc.getName() + " 在路上遇到老朋友，心情变好";
+                severity = "MEET";
                 log.info("NPC {} 遇到朋友，心情变好", npc.getName());
                 break;
 
             case 2: // 工作小成就
                 stats.setHappiness(Math.min(100, stats.getHappiness() + 15));
                 npc.setCurrentAction("完成一个小项目");
+                title = npc.getName() + " 工作小成就";
+                detail = npc.getName() + " 完成一个小项目";
+                severity = "WORK";
                 log.info("NPC {} 工作有进展", npc.getName());
                 break;
 
             case 3: // 遇到麻烦
                 stats.setHappiness(Math.max(0, stats.getHappiness() - 15));
                 npc.setCurrentAction("遇到点小麻烦");
+                title = npc.getName() + " 遇到麻烦";
+                detail = npc.getName() + " 遇到点小麻烦，心情下降";
+                severity = "TROUBLE";
                 log.info("NPC {} 遇到麻烦", npc.getName());
                 break;
 
             default:
-                // 其他事件类型可以扩展
                 break;
+        }
+        if (title != null) {
+            townEventService.record("LIFE", title, detail, npc.getId(), severity, 8);
         }
     }
 
@@ -871,11 +946,58 @@ public class NPCSimulatorService {
     }
 
     /**
+     * 清理历史残留的异常堆栈式决策理由（旧版 AI 反序列化失败文案）
+     */
+    public int scrubStaleDecisionReasons() {
+        List<NPC> npcs = npcRepository.findAll();
+        int fixed = 0;
+        for (NPC npc : npcs) {
+            String reason = npc.getLastDecisionReason();
+            if (isToxicDecisionReason(reason)) {
+                npc.setLastDecisionReason("规则引擎决策（历史异常已清理，等待下次 AI 决策）");
+                npcRepository.save(npc);
+                fixed++;
+            }
+        }
+        if (fixed > 0) {
+            log.warn("已清理 {} 条异常决策理由", fixed);
+        }
+        return fixed;
+    }
+
+    public static String sanitizeDecisionReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "综合考虑NPC状态和环境";
+        }
+        if (isToxicDecisionReason(reason)) {
+            return "规则引擎决策（AI暂不可用）";
+        }
+        String trimmed = reason.trim();
+        return trimmed.length() > 180 ? trimmed.substring(0, 179) + "…" : trimmed;
+    }
+
+    private static boolean isToxicDecisionReason(String reason) {
+        if (reason == null) {
+            return false;
+        }
+        String r = reason.toLowerCase();
+        return r.contains("expected begin_object")
+                || r.contains("illegalstateexception")
+                || r.contains("ai失败:")
+                || r.contains("exception:")
+                || r.contains(" at line ")
+                || r.contains("path $");
+    }
+
+    /**
      * 结束当前模拟，清空所有NPC，便于重新初始化
      */
     public void endSimulation() {
         long count = npcRepository.count();
         npcRepository.deleteAll();
-        log.warn("模拟已结束，清空{}个NPC", count);
+        relationshipRepository.deleteAll();
+        townEventRepository.deleteAll();
+        modeService.resetAll();
+        log.warn("模拟已结束，清空{}个NPC及相关关系/事件", count);
     }
 }

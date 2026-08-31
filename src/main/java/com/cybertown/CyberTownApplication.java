@@ -30,6 +30,7 @@ public class CyberTownApplication implements CommandLineRunner {
 
         // 初始化NPC数据
         npcSimulatorService.initializeNPCs();
+        npcSimulatorService.scrubStaleDecisionReasons();
 
         log.info("🏙️ 赛博小镇准备就绪！");
     }

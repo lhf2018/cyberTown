@@ -2,13 +2,18 @@ package com.cybertown.controller;
 
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.npc.NPCStats;
+import com.cybertown.domain.npc.Relationship;
+import com.cybertown.domain.world.Location;
+import com.cybertown.domain.world.TownEvent;
+import com.cybertown.repository.LocationRepository;
 import com.cybertown.repository.NPCRepository;
-import com.cybertown.service.AIService;
-import com.cybertown.service.NewsService;
-import com.cybertown.service.NPCSimulatorService;
+import com.cybertown.service.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.util.CollectionUtils;
@@ -32,16 +37,27 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @RequiredArgsConstructor
 public class TownController {
     private final NPCRepository npcRepository;
+    private final LocationRepository locationRepository;
     private final AIService aiService;
     private final NewsService newsService;
     private final NPCSimulatorService npcSimulatorService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final WorldEventService worldEventService;
+    private final TownEventService townEventService;
+    private final SocialService socialService;
+    private final ModeService modeService;
+    private final SnapshotService snapshotService;
+    private final ObjectMapper objectMapper;
 
     // SSE emitters 列表，用于HTTP长连接推送
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
     // 存储最新的NPC状态缓存
     private Map<String, Object> latestNPCStatus = new HashMap<>();
+
+    private String clientKey(String header) {
+        return (header == null || header.isBlank()) ? "global" : header.trim();
+    }
 
     // ============= REST API 端点 =============
 
@@ -66,26 +82,51 @@ public class TownController {
      * 3. 与NPC对话
      */
     @PostMapping("/npc/{id}/talk")
-    public Map<String, Object> talkToNPC(@PathVariable String id,
-                                         @RequestBody Map<String, String> request) {
-        String message = request.get("message");
-        NPC npc = getNPC(id);
-        return processTalk(npc, message);
+    public ResponseEntity<?> talkToNPC(@PathVariable String id,
+                                       @RequestBody Map<String, String> request,
+                                       @RequestHeader(value = "X-Client-Key", required = false) String clientKeyHeader) {
+        try {
+            String clientKey = clientKey(clientKeyHeader);
+            modeService.assertCanTalk(clientKey);
+            String message = request.get("message");
+            NPC npc = getNPC(id);
+            Map<String, Object> result = processTalk(npc, message);
+            modeService.consumeTalk(clientKey);
+            Map<String, Object> out = new LinkedHashMap<>(result);
+            out.putAll(modeService.getStatus(clientKey));
+            return ResponseEntity.ok(out);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
+        }
     }
 
     @GetMapping(value = "/npc/{id}/talk/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter talkToNPCStream(@PathVariable String id, @RequestParam("message") String message) {
-        NPC npc = getNPC(id);
+    public SseEmitter talkToNPCStream(@PathVariable String id,
+                                      @RequestParam("message") String message,
+                                      @RequestHeader(value = "X-Client-Key", required = false) String clientKeyHeader,
+                                      @RequestParam(value = "clientKey", required = false) String clientKeyParam) {
+        String clientKey = clientKey(clientKeyHeader != null ? clientKeyHeader : clientKeyParam);
         SseEmitter emitter = new SseEmitterUTF8(120_000L);
         CompletableFuture.runAsync(() -> {
             try {
+                modeService.assertCanTalk(clientKey);
+                NPC npc = getNPC(id);
                 Map<String, Object> result = processTalk(npc, message);
+                modeService.consumeTalk(clientKey);
                 String response = String.valueOf(result.getOrDefault("response", ""));
                 for (String chunk : splitToChunks(response, 8)) {
                     sendSSEEvent(emitter, "chunk", Map.of("text", chunk));
                     Thread.sleep(30);
                 }
-                sendSSEEvent(emitter, "done", result);
+                Map<String, Object> done = new LinkedHashMap<>(result);
+                done.putAll(modeService.getStatus(clientKey));
+                sendSSEEvent(emitter, "done", done);
+                emitter.complete();
+            } catch (IllegalStateException e) {
+                try {
+                    sendSSEEvent(emitter, "error", Map.of("message", e.getMessage()));
+                } catch (Exception ignored) {
+                }
                 emitter.complete();
             } catch (Exception e) {
                 try {
@@ -114,43 +155,55 @@ public class TownController {
         }
         npcRepository.save(npc);
 
-        return Map.of(
-                "npc", npc.getName(),
-                "response", response,
-                "mood", getMoodEmoji(npc.getStats().getHappiness()),
-                "influenceActive", influence.active(),
-                "influenceSummary", influence.active() ? influence.summary() : null,
-                "influenceWeight", influence.active() ? influence.weight() : 0,
-                "influenceDurationMinutes", influence.active() ? influence.durationMinutes() : 0,
-                "context", npc.getDialogueMemory() == null ? "" : npc.getDialogueMemory()
-        );
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("npc", npc.getName());
+        out.put("response", response);
+        out.put("mood", getMoodEmoji(npc.getStats().getHappiness()));
+        out.put("influenceActive", influence.active());
+        out.put("influenceSummary", influence.active() ? influence.summary() : "");
+        out.put("influenceWeight", influence.active() ? influence.weight() : 0);
+        out.put("influenceDurationMinutes", influence.active() ? influence.durationMinutes() : 0);
+        out.put("context", npc.getDialogueMemory() == null ? "" : npc.getDialogueMemory());
+        return out;
     }
 
     /**
      * 上帝模式：通过自然语言修改NPC属性
      */
     @PostMapping("/npc/{id}/god-command")
-    public Map<String, Object> godCommand(@PathVariable String id, @RequestBody Map<String, String> request) {
-        NPC npc = getNPC(id);
-        String instruction = request == null ? null : request.get("instruction");
-        AIService.GodModification mod = aiService.parseGodInstruction(npc, instruction);
-        mod = enhanceGodModificationFromInstruction(mod, instruction);
+    public ResponseEntity<?> godCommand(@PathVariable String id,
+                                        @RequestBody Map<String, String> request,
+                                        @RequestHeader(value = "X-Client-Key", required = false) String clientKeyHeader) {
+        try {
+            String clientKey = clientKey(clientKeyHeader);
+            modeService.assertCanGod(clientKey);
+            NPC npc = getNPC(id);
+            String instruction = request == null ? null : request.get("instruction");
+            AIService.GodModification mod = aiService.parseGodInstruction(npc, instruction);
+            mod = enhanceGodModificationFromInstruction(mod, instruction);
 
-        applyGodModification(npc, mod);
-        applyCompensationOverridesFromInstruction(npc, instruction);
-        String requestedSchool = detectSchoolFromInstruction(instruction);
-        refreshAndStoreEducationHistory(npc, requestedSchool);
-        NPC saved = npcRepository.save(npc);
-        String npcReply = aiService.generateGodReply(saved, instruction);
+            applyGodModification(npc, mod);
+            applyCompensationOverridesFromInstruction(npc, instruction);
+            String requestedSchool = detectSchoolFromInstruction(instruction);
+            refreshAndStoreEducationHistory(npc, requestedSchool);
+            String relationMsg = socialService.applyGodRelationshipInstruction(npc, instruction);
+            NPC saved = npcRepository.save(npc);
+            String npcReply = aiService.generateGodReply(saved, instruction);
+            modeService.consumeGod(clientKey);
 
-        return Map.of(
-                "message", "上帝指令执行完成",
-                "npcId", saved.getId(),
-                "npcName", saved.getName(),
-                "educationLevel", saved.getStats().getEducationLevel(),
-                "npcReply", npcReply,
-                "npc", saved
-        );
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("message", "上帝指令执行完成");
+            out.put("npcId", saved.getId());
+            out.put("npcName", saved.getName());
+            out.put("educationLevel", saved.getStats().getEducationLevel());
+            out.put("npcReply", npcReply);
+            out.put("relationshipChange", relationMsg);
+            out.put("npc", saved);
+            out.putAll(modeService.getStatus(clientKey));
+            return ResponseEntity.ok(out);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", e.getMessage()));
+        }
     }
 
     /**
@@ -323,10 +376,19 @@ public class TownController {
     }
 
     /**
-     * 世界广播（纯展示，不影响数值）
+     * 世界广播：优先返回活跃世界事件
      */
     @GetMapping("/world/broadcast")
     public Map<String, Object> getWorldBroadcast() {
+        String active = worldEventService.getBroadcastMessage();
+        if (active != null && !active.isBlank()) {
+            return Map.of(
+                    "message", active,
+                    "source", "WORLD_EVENT",
+                    "timestamp", LocalDateTime.now().toString()
+            );
+        }
+
         List<NPC> npcs = npcRepository.findAll();
         String[] globalEvents = {
                 "霓虹主干道出现临时集市，夜间人流激增。",
@@ -345,8 +407,106 @@ public class TownController {
 
         return Map.of(
                 "message", message,
+                "source", "FLAVOR",
                 "timestamp", LocalDateTime.now().toString()
         );
+    }
+
+    @GetMapping("/events")
+    public Map<String, Object> getTownEvents(@RequestParam(defaultValue = "40") int limit) {
+        List<TownEvent> events = townEventService.recent(limit);
+        return Map.of(
+                "events", events,
+                "count", events.size(),
+                "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
+    @GetMapping("/locations")
+    public Map<String, Object> getLocations() {
+        List<Location> locations = locationRepository.findAll();
+        List<NPC> npcs = npcRepository.findAll();
+        Map<String, Long> counts = new HashMap<>();
+        for (NPC npc : npcs) {
+            String loc = npc.getCurrentLocation() == null ? "未知" : npc.getCurrentLocation();
+            counts.merge(loc, 1L, Long::sum);
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Location loc : locations) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", loc.getId());
+            row.put("name", loc.getName());
+            row.put("type", loc.getType());
+            row.put("description", loc.getDescription());
+            row.put("capacity", loc.getCapacity());
+            row.put("mapX", loc.getMapX());
+            row.put("mapY", loc.getMapY());
+            row.put("npcCount", counts.getOrDefault(loc.getName(), 0L));
+            rows.add(row);
+        }
+        // 未种子化但 NPC 正在使用的地点
+        for (Map.Entry<String, Long> e : counts.entrySet()) {
+            boolean known = locations.stream().anyMatch(l -> e.getKey().equals(l.getName()));
+            if (!known) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", "dyn-" + e.getKey().hashCode());
+                row.put("name", e.getKey());
+                row.put("type", "OTHER");
+                row.put("description", "动态地点");
+                row.put("capacity", 20);
+                row.put("mapX", 50);
+                row.put("mapY", 50);
+                row.put("npcCount", e.getValue());
+                rows.add(row);
+            }
+        }
+        return Map.of("locations", rows, "timestamp", LocalDateTime.now().toString());
+    }
+
+    @GetMapping("/npc/{id}/relationships")
+    public Map<String, Object> getRelationships(@PathVariable String id) {
+        NPC npc = getNPC(id);
+        return Map.of(
+                "npcId", npc.getId(),
+                "npcName", npc.getName(),
+                "relationships", socialService.listForNpc(id)
+        );
+    }
+
+    @GetMapping("/mode")
+    public Map<String, Object> getMode(@RequestHeader(value = "X-Client-Key", required = false) String clientKeyHeader) {
+        return modeService.getStatus(clientKey(clientKeyHeader));
+    }
+
+    @PostMapping("/mode")
+    public Map<String, Object> setMode(@RequestBody Map<String, String> body,
+                                       @RequestHeader(value = "X-Client-Key", required = false) String clientKeyHeader) {
+        String mode = body == null ? ModeService.MODE_OPERATOR : body.getOrDefault("mode", ModeService.MODE_OPERATOR);
+        return modeService.setMode(clientKey(clientKeyHeader), mode);
+    }
+
+    @GetMapping("/snapshot")
+    public Map<String, Object> exportSnapshot() {
+        return snapshotService.exportSnapshot();
+    }
+
+    @PostMapping("/snapshot/import")
+    public Map<String, Object> importSnapshot(@RequestBody Map<String, Object> body) {
+        List<NPC> npcs = convertList(body.get("npcs"), NPC.class);
+        List<Relationship> relationships = convertList(body.get("relationships"), Relationship.class);
+        List<TownEvent> events = convertList(body.get("events"), TownEvent.class);
+        return snapshotService.importEntities(npcs, relationships, events);
+    }
+
+    private <T> List<T> convertList(Object raw, Class<T> type) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<T> out = new ArrayList<>();
+        for (Object o : list) {
+            out.add(objectMapper.convertValue(o, type));
+        }
+        return out;
     }
 
     @GetMapping("/world/news")
@@ -628,6 +788,9 @@ public class TownController {
             status.put("isTired", npc.isTired());
             status.put("statusSummary", getStatusSummary(npc));
             status.put("currentThought", CollectionUtils.isEmpty(npc.getCurrentThoughts()) ? null : npc.getCurrentThoughts().get(npc.getCurrentThoughts().size() - 1));
+            status.put("lastDecision", npc.getLastDecision());
+            status.put("lastDecisionReason", com.cybertown.service.NPCSimulatorService.sanitizeDecisionReason(npc.getLastDecisionReason()));
+            status.put("lastDecisionAt", npc.getLastDecisionAt() == null ? null : npc.getLastDecisionAt().toString());
 
             npcStatusList.add(status);
         }

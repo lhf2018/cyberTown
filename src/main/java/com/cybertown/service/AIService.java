@@ -559,6 +559,33 @@ public class AIService {
         }
     }
 
+    /**
+     * NPC 之间短对话（控费用：每心跳至多调用一次）
+     */
+    public String generateNpcDialogue(NPC a, NPC b, String location, int affinity, boolean clash) {
+        try {
+            String prompt = """
+                    生成两名赛博小镇居民的短对话（总共1-2句中文，口语，带一点赛博风）。
+                    A：%s（%s，性格：%s）
+                    B：%s（%s，性格：%s）
+                    地点：%s
+                    当前好感：%d
+                    气氛：%s
+                    只输出对话内容，不要旁白，不要引号。
+                    """.formatted(
+                    a.getName(), a.getOccupation(), a.getPersonality(),
+                    b.getName(), b.getOccupation(), b.getPersonality(),
+                    location, affinity, clash ? "争执/不合" : "友善闲聊"
+            );
+            return sanitize(chatClient.call(prompt));
+        } catch (Exception e) {
+            log.warn("NPC对话生成失败: {}", e.getMessage());
+            return clash
+                    ? a.getName() + "：" + b.getName() + "，你这次越界了。 / " + b.getName() + "：少教训我。"
+                    : a.getName() + "：今晚信号还稳。 / " + b.getName() + "：稳就好，喝一杯？";
+        }
+    }
+
     public String generateThoughtBubble(NPC npc, String newsHeadline) {
         try {
             String prompt = """

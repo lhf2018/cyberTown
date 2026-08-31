@@ -127,12 +127,13 @@ public class NPCDecisionTools {
     /**
      * 检查社交需求
      */
-    @Tool("检查NPC的社交需求，考虑性格和当前心情")
+    @Tool("检查NPC的社交需求，考虑性格、当前心情以及同地点熟人关系摘要")
     public SocialResult checkSocial(
             @V("NPC的性格") String personality,
             @V("社交需求值") int socialNeed,
             @V("当前心情") int happiness,
-            @V("NPC姓名") String npcName
+            @V("NPC姓名") String npcName,
+            @V("同地点熟人摘要，可为空") String nearbyRelations
     ) {
         log.debug("LangGraph工具调用: checkSocial for {}", npcName);
 
@@ -180,6 +181,13 @@ public class NPCDecisionTools {
         // 心情影响
         if (happiness < 30 && socialNeed > 50) {
             suggestion.append(" (心情低落时社交可能改善情绪)");
+        }
+
+        if (nearbyRelations != null && !nearbyRelations.isBlank() && !nearbyRelations.contains("暂无")) {
+            suggestion.append(" [同地点熟人] ").append(nearbyRelations);
+            if (suggestedActivity == null || suggestedActivity.contains("独处")) {
+                suggestedActivity = "与同地点熟人互动";
+            }
         }
 
         result.setSuggestion(suggestion.toString());

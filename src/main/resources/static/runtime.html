@@ -3,101 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>赛博小镇运行面板</title>
-    <style>
-        :root { color-scheme: dark; --bg:#070b14; --panel:#101a2c; --line:#26385f; --text:#d8e3ff; --muted:#9cafd4; --primary:#4f86ff; --neon:#4de8ff; }
-        * { box-sizing: border-box; }
-        body { margin:0; font-family:"Microsoft YaHei",sans-serif; background:radial-gradient(circle at top right,#1c2950,var(--bg) 45%); color:var(--text); min-height:100vh; }
-        .wrap { max-width:1280px; margin:20px auto; padding:0 16px 20px; }
-        .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
-        .top { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; }
-        h1 { margin:0; font-size:24px; }
-        .status,.line { color:var(--muted); font-size:13px; }
-        .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:10px; }
-        button { background:var(--primary); color:#fff; border:0; border-radius:8px; padding:8px 12px; cursor:pointer; font-weight:600; }
-        button.secondary { background:#334155; }
-        .small-input { width:100%; border:1px solid #334155; border-radius:6px; padding:8px; background:#0a1020; color:var(--text); margin-top:6px; }
-        .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
-        .metric { background:#0d1423; border:1px solid #1e2c46; border-radius:10px; padding:10px; }
-        .metric .label { color:var(--muted); font-size:13px; }
-        .metric .value { font-size:20px; font-weight:700; margin-top:4px; }
-        .broadcast-panel { border:1px solid #3e5f95; background:linear-gradient(120deg,#18253d,#101a2d); box-shadow:inset 0 0 40px rgba(79,134,255,.08); }
-        .broadcast-title { font-size:14px; color:#8fb4ff; letter-spacing:1px; margin-bottom:8px; }
-        .broadcast-message { font-size:20px; line-height:1.5; font-weight:700; min-height:64px; }
-        .broadcast-time { margin-top:8px; color:var(--muted); font-size:12px; }
-        .news-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-        .news-list { margin:6px 0 0; padding-left:16px; }
-        .news-list li { margin:4px 0; color:#bfd1f4; font-size:13px; }
-        .npc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
-        .card { border:1px solid #2a3f69; background:linear-gradient(160deg,#0e1630,#0c1325); border-radius:14px; padding:12px; box-shadow:0 8px 24px rgba(6,10,20,.35); position:relative; }
-        .head { display:flex; gap:10px; align-items:center; margin-bottom:8px; }
-        .avatar { width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px; border:1px solid #4c73b8; background:radial-gradient(circle at 35% 35%,#2b4576,#121f3a 65%); animation:pulse 2.8s ease-in-out infinite; }
-        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(77,232,255,.35); transform:translateY(0)} 50%{box-shadow:0 0 0 8px rgba(77,232,255,0); transform:translateY(-2px)} 100%{box-shadow:0 0 0 0 rgba(77,232,255,0); transform:translateY(0)} }
-        .name { font-weight:700; font-size:17px; }
-        .sub { font-size:12px; color:var(--muted); }
-        .bar { height:7px; border-radius:4px; background:#1f2937; overflow:hidden; margin:4px 0 6px; }
-        .bar > span { display:block; height:100%; background:linear-gradient(90deg,var(--neon),var(--primary)); transition:width .35s ease; }
-        .skills { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 6px; }
-        .chip { font-size:11px; border:1px solid #35558a; color:#bdd6ff; border-radius:999px; padding:2px 8px; background:rgba(17,33,61,.8); }
-        .tiny-btn { margin-top:6px; padding:6px 8px; font-size:12px; }
-        .thought-layer { position:fixed; inset:0; pointer-events:none; z-index:20; }
-        .bubble { position:absolute; max-width:260px; background:rgba(28,40,70,.95); border:1px solid #4a6fae; color:#d9e7ff; border-radius:14px; padding:8px 10px; font-size:12px; box-shadow:0 6px 18px rgba(0,0,0,.35); animation:floatFade 9s ease forwards; }
-        .bubble strong { color:#8fd0ff; }
-        @keyframes floatFade { 0%{opacity:0; transform:translateY(12px)} 12%{opacity:1} 85%{opacity:1} 100%{opacity:0; transform:translateY(-20px)} }
-        .modal-mask { position:fixed; inset:0; background:rgba(4,8,16,.66); display:none; align-items:center; justify-content:center; z-index:30; }
-        .modal { width:min(760px,95vw); max-height:86vh; overflow:auto; background:#0f1730; border:1px solid #35558a; border-radius:14px; padding:14px; }
-        .chat-list { background:#0b1224; border:1px solid #25395f; border-radius:10px; padding:12px; height:360px; overflow:auto; margin:8px 0; display:flex; flex-direction:column; gap:8px; }
-        .msg-row { display:flex; }
-        .msg-row.me { justify-content:flex-end; }
-        .msg-row.npc { justify-content:flex-start; }
-        .msg-bubble { max-width:78%; border-radius:10px; padding:8px 10px; font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
-        .msg-row.me .msg-bubble { background:#95ec69; color:#1f2a12; border-top-right-radius:4px; }
-        .msg-row.npc .msg-bubble { background:#ffffff; color:#1f2937; border-top-left-radius:4px; }
-        .msg-meta { font-size:11px; color:#8aa0c9; margin-bottom:2px; }
-        .typing { opacity:.75; font-style:italic; }
-        .link-btn { background:linear-gradient(120deg,#2d4d85,#3f6cc0); color:#fff; border:1px solid #7ca8ff; border-radius:999px; padding:4px 10px; font-size:12px; cursor:pointer; font-weight:700; box-shadow:0 3px 10px rgba(54,98,179,.35); }
-        .detail-list { margin:8px 0 0; padding-left:18px; }
-        .detail-list li { margin:6px 0; color:#d5e5ff; }
-    </style>
+    <title>Cyber Town · 赛博小镇</title>
+    <link rel="stylesheet" href="/css/runtime.css">
 </head>
 <body>
 <div class="wrap">
-    <div class="panel broadcast-panel">
-        <div class="broadcast-title">世界广播</div>
-        <div class="broadcast-message" id="worldBroadcast">正在接收世界事件...</div>
-        <div class="broadcast-time" id="worldBroadcastTime"></div>
-    </div>
-    <div class="panel news-grid">
+    <header class="brand-bar">
         <div>
-            <div class="broadcast-title">实时新闻（Web Search）</div>
+            <div class="brand-mark">CYBER TOWN</div>
+            <div class="brand-sub">赛博小镇实时运行台 · 地图 / 事件 / 居民</div>
+        </div>
+        <div class="status" id="connectionStatus">连接中...</div>
+    </header>
+
+    <div class="layout-main">
+        <div class="panel broadcast-panel">
+            <div class="broadcast-title">LIVE BROADCAST</div>
+            <div class="broadcast-message" id="worldBroadcast">正在接收世界事件...</div>
+            <div class="broadcast-time" id="worldBroadcastTime"></div>
+        </div>
+        <div class="panel">
+            <div class="top">
+                <h2 class="panel-title">今日大事</h2>
+                <div class="status">WORLD / SOCIAL / LIFE</div>
+            </div>
+            <div class="timeline" id="eventTimeline">
+                <div class="line">加载事件中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel map-panel">
+        <div class="top">
+            <h2 class="panel-title">小镇地图</h2>
+            <div class="status" id="mapFilterLabel">点击区块筛选居民 · 再点取消</div>
+        </div>
+        <div class="map-wrap">
+            <div class="map-canvas" id="townMap"></div>
+        </div>
+        <div class="map-legend">
+            <span>人数徽章 = 当前在该地点的 NPC</span>
+            <span>高亮边框 = 当前筛选</span>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="top">
+            <h2 class="panel-title">控制台</h2>
+            <span class="mode-badge" id="modeBadge">模式加载中...</span>
+        </div>
+        <div class="row">
+            <button id="toggleModeBtn" class="secondary">切换为旁观模式</button>
+            <button id="broadcastBtn" class="secondary">手动广播</button>
+            <button id="reloadBtn" class="secondary">立即刷新</button>
+            <button id="exportSnapshotBtn" class="secondary">导出快照</button>
+            <label class="file-btn">
+                导入快照
+                <input id="importSnapshotInput" type="file" accept="application/json,.json" style="display:none;">
+            </label>
+            <button id="endSimBtn" class="danger">结束模拟</button>
+        </div>
+        <div class="row status" id="opStatus"></div>
+    </div>
+
+    <div class="panel news-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+            <div class="broadcast-title">实时新闻</div>
             <ul id="newsList" class="news-list"><li>正在抓取新闻...</li></ul>
         </div>
         <div>
-            <div class="broadcast-title">新闻摘要（影响NPC）</div>
+            <div class="broadcast-title">新闻摘要 · 影响决策</div>
             <div class="line" id="newsBrief">加载中...</div>
             <div class="line" id="newsUpdatedAt"></div>
         </div>
     </div>
-    <div class="panel">
-        <div class="top"><h1>赛博小镇运行面板</h1><div class="status" id="connectionStatus">连接中...</div></div>
-        <div class="row"><button id="broadcastBtn" class="secondary">手动广播状态</button><button id="reloadBtn" class="secondary">立即刷新</button><button id="endSimBtn">结束模拟并返回初始化</button></div>
-        <div class="row status" id="opStatus"></div>
-    </div>
-    <div class="panel">
-        <div class="top"><h1 style="font-size:20px;">上帝模式</h1><div class="status">用自然语言直接修改某个NPC属性</div></div>
-        <div class="row"><label>NPC <select id="godNpcSelect" class="small-input" style="min-width:200px;"></select></label></div>
-        <textarea id="godInstruction" class="small-input" rows="3" placeholder="例如：把这个NPC的金钱改成20000，负债清零，目标改成三个月内买房，技能提升到85"></textarea>
+
+    <div class="panel operator-only" id="godPanel">
+        <div class="top">
+            <h2 class="panel-title">上帝模式</h2>
+            <div class="status">改属性 / 关系，如「对莉莉好感+30」</div>
+        </div>
+        <div class="row"><label style="min-width:220px;">NPC
+            <select id="godNpcSelect" class="small-input" style="margin-top:6px;"></select>
+        </label></div>
+        <textarea id="godInstruction" class="small-input" rows="3" placeholder="例如：把金钱改成20000；或：对莉莉好感+30；或：和老王结仇"></textarea>
         <div class="row"><button id="godApplyBtn">执行上帝指令</button><span class="status" id="godStatus"></span></div>
         <div class="line" id="godNpcReply"></div>
     </div>
-    <div class="panel"><div class="metrics"><div class="metric"><div class="label">NPC 总数</div><div class="value" id="mTotal">-</div></div><div class="metric"><div class="label">饥饿人数</div><div class="value" id="mHungry">-</div></div><div class="metric"><div class="label">疲劳人数</div><div class="value" id="mTired">-</div></div><div class="metric"><div class="label">开心人数</div><div class="value" id="mHappy">-</div></div><div class="metric"><div class="label">最后更新时间</div><div class="value" id="mUpdated">-</div></div></div></div>
-    <div class="panel"><div class="top"><h1 style="font-size:20px;">实时 NPC 状态</h1><div class="status" id="npcCountText"></div></div><div id="npcGrid" class="npc-grid"></div></div>
+
+    <div class="panel">
+        <div class="metrics">
+            <div class="metric"><div class="label">居民</div><div class="value" id="mTotal">-</div></div>
+            <div class="metric"><div class="label">饥饿</div><div class="value" id="mHungry">-</div></div>
+            <div class="metric"><div class="label">疲劳</div><div class="value" id="mTired">-</div></div>
+            <div class="metric"><div class="label">开心</div><div class="value" id="mHappy">-</div></div>
+            <div class="metric"><div class="label">更新</div><div class="value" id="mUpdated" style="font-size:14px;">-</div></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="top">
+            <h2 class="panel-title">居民状态</h2>
+            <div class="status" id="npcCountText"></div>
+        </div>
+        <div id="npcGrid" class="npc-grid"></div>
+    </div>
 </div>
 
 <div class="thought-layer" id="thoughtLayer"></div>
 <div class="modal-mask" id="talkModalMask">
     <div class="modal">
-        <div class="top"><h1 id="talkModalTitle" style="font-size:20px;">对话</h1><button class="secondary" id="closeTalkModalBtn">关闭</button></div>
+        <div class="top"><h2 class="panel-title" id="talkModalTitle">对话</h2><button class="secondary" id="closeTalkModalBtn">关闭</button></div>
         <div class="chat-list" id="chatList"></div>
         <input id="talkMessageInput" class="small-input" placeholder="输入你想说的话..." />
         <div class="row"><button id="sendTalkBtn">发送</button><span class="status" id="talkModalStatus"></span></div>
@@ -105,529 +121,12 @@
 </div>
 <div class="modal-mask" id="profileModalMask">
     <div class="modal">
-        <div class="top"><h1 id="profileModalTitle" style="font-size:20px;">详情</h1><button class="secondary" id="closeProfileModalBtn">关闭</button></div>
+        <div class="top"><h2 class="panel-title" id="profileModalTitle">详情</h2><button class="secondary" id="closeProfileModalBtn">关闭</button></div>
         <div class="line" id="profileModalSubtitle"></div>
         <div id="profileModalContent" class="chat-list" style="height:420px;"></div>
     </div>
 </div>
 
-<script>
-    const connectionStatus = document.getElementById("connectionStatus");
-    const opStatus = document.getElementById("opStatus");
-    const npcGrid = document.getElementById("npcGrid");
-    const npcCountText = document.getElementById("npcCountText");
-
-    const mTotal = document.getElementById("mTotal");
-    const mHungry = document.getElementById("mHungry");
-    const mTired = document.getElementById("mTired");
-    const mHappy = document.getElementById("mHappy");
-    const mUpdated = document.getElementById("mUpdated");
-    const worldBroadcast = document.getElementById("worldBroadcast");
-    const worldBroadcastTime = document.getElementById("worldBroadcastTime");
-    const newsList = document.getElementById("newsList");
-    const newsBrief = document.getElementById("newsBrief");
-    const newsUpdatedAt = document.getElementById("newsUpdatedAt");
-    const godNpcSelect = document.getElementById("godNpcSelect");
-    const godInstruction = document.getElementById("godInstruction");
-    const godStatus = document.getElementById("godStatus");
-    const godNpcReply = document.getElementById("godNpcReply");
-
-    const thoughtLayer = document.getElementById("thoughtLayer");
-    const talkModalMask = document.getElementById("talkModalMask");
-    const talkModalTitle = document.getElementById("talkModalTitle");
-    const chatList = document.getElementById("chatList");
-    const talkMessageInput = document.getElementById("talkMessageInput");
-    const talkModalStatus = document.getElementById("talkModalStatus");
-    const profileModalMask = document.getElementById("profileModalMask");
-    const profileModalTitle = document.getElementById("profileModalTitle");
-    const profileModalSubtitle = document.getElementById("profileModalSubtitle");
-    const profileModalContent = document.getElementById("profileModalContent");
-    let source = null;
-    let talkStreamSource = null;
-    let currentNpcMap = new Map();
-    let selectedTalkNpcId = null;
-
-    function setOpStatus(text, isError = false) {
-        opStatus.style.color = isError ? "#f87171" : "#93a2c5";
-        opStatus.textContent = text;
-    }
-
-    async function postJson(url) {
-        const resp = await fetch(url, { method: "POST" });
-        if (!resp.ok) {
-            throw new Error(`请求失败: ${url}`);
-        }
-        const ct = resp.headers.get("content-type") || "";
-        if (ct.includes("application/json")) return resp.json();
-        return resp.text();
-    }
-
-    function renderNPCList(list) {
-        const npcs = Array.isArray(list) ? list : [];
-        npcCountText.textContent = `共 ${npcs.length} 人`;
-        npcGrid.innerHTML = npcs.map((n) => {
-            const energy = Number(n.energy ?? n.stats?.energy ?? 0);
-            const hunger = Number(n.hunger ?? n.stats?.hunger ?? 0);
-            const happiness = Number(n.happiness ?? n.stats?.happiness ?? 0);
-            const socialNeed = Number(n.socialNeed ?? n.stats?.socialNeed ?? 0);
-            const mood = n.mood ?? getMoodText(happiness);
-            const statusSummary = n.statusSummary ?? getStatusSummary({ energy, hunger, happiness, socialNeed });
-            const goal = n.currentGoal ?? n.goal ?? "-";
-            const skillLevel = Number(n.skillLevel ?? n.stats?.skillLevel ?? 0);
-            const knowledgeLevel = Number(n.knowledgeLevel ?? n.stats?.knowledgeLevel ?? 0);
-            const reputation = Number(n.reputation ?? n.stats?.reputation ?? 0);
-            const health = Number(n.health ?? n.stats?.health ?? 0);
-            const technicalKnowledge = Number(n.technicalKnowledge ?? n.stats?.technicalKnowledge ?? 0);
-            const businessKnowledge = Number(n.businessKnowledge ?? n.stats?.businessKnowledge ?? 0);
-            const socialKnowledge = Number(n.socialKnowledge ?? n.stats?.socialKnowledge ?? 0);
-            const practicalSkill = Number(n.practicalSkill ?? n.stats?.practicalSkill ?? 0);
-            const creativeSkill = Number(n.creativeSkill ?? n.stats?.creativeSkill ?? 0);
-            const employer = n.employer || "自由职业";
-            const avatar = getNpcAvatar(n.occupation || "");
-            return `
-                <div class="card">
-                    <div class="head">
-                        <div class="avatar">${avatar}</div>
-                        <div>
-                            <div class="name">${n.name || "未知"} · ${n.occupation || "-"}</div>
-                            <div class="sub">就职于：${employer}</div>
-                        </div>
-                    </div>
-                    <div class="line">位置：${n.location || n.currentLocation || "-"}</div>
-                    <div class="line">动作：${n.action || n.currentAction || "-"}</div>
-                    <div class="line">目标：${goal}</div>
-                    <div class="line">状态：${statusSummary}</div>
-                    <div class="line">心情：${mood}</div>
-                    <div class="line">总技能：${skillLevel} | 总知识：${knowledgeLevel} | 声望：${reputation} | 健康：${health}</div>
-                    <div class="skills">
-                        <span class="chip">技术知识 ${technicalKnowledge}</span>
-                        <span class="chip">商业知识 ${businessKnowledge}</span>
-                        <span class="chip">人际知识 ${socialKnowledge}</span>
-                        <span class="chip">实操技能 ${practicalSkill}</span>
-                        <span class="chip">创造技能 ${creativeSkill}</span>
-                    </div>
-                    <div class="row">
-                        <button class="link-btn" onclick="openProfileModal('${n.id}', 'assets')">资产详情</button>
-                        <button class="link-btn" onclick="openProfileModal('${n.id}', 'education')">学历详情</button>
-                        <button class="link-btn" onclick="openProfileModal('${n.id}', 'compensation')">工资详情</button>
-                    </div>
-                    <div class="line">能量 ${energy}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, energy))}%"></span></div>
-                    <div class="line">饥饿 ${hunger}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, hunger))}%"></span></div>
-                    <div class="line">快乐 ${happiness}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, happiness))}%"></span></div>
-                    <div class="line">社交需求 ${socialNeed}</div><div class="bar"><span style="width:${Math.max(0, Math.min(100, socialNeed))}%"></span></div>
-                    <button class="tiny-btn" onclick="openTalkModal('${n.id}')">打开对话</button>
-                </div>
-            `;
-        }).join("");
-        currentNpcMap = new Map(npcs.map(n => [n.id, n]));
-        syncGodNpcOptions(npcs);
-    }
-
-    function getMoodText(happiness) {
-        if (happiness > 80) return "高兴";
-        if (happiness > 60) return "还行";
-        if (happiness > 40) return "一般";
-        if (happiness > 20) return "沮丧";
-        return "痛苦";
-    }
-
-    function getStatusSummary(stats) {
-        const tags = [];
-        if (stats.hunger > 70) tags.push("饥饿");
-        if (stats.energy < 30) tags.push("疲劳");
-        if (stats.happiness < 30) tags.push("低落");
-        if (stats.socialNeed > 70) tags.push("需社交");
-        return tags.length ? tags.join("、") : "正常";
-    }
-
-    function getNpcAvatar(occupation) {
-        if (occupation.includes("程序员") || occupation.includes("黑客")) return "🧑‍💻";
-        if (occupation.includes("警察") || occupation.includes("保安")) return "👮";
-        if (occupation.includes("医生")) return "🧑‍⚕️";
-        if (occupation.includes("设计")) return "🎨";
-        if (occupation.includes("司机")) return "🚕";
-        if (occupation.includes("舞者")) return "💃";
-        if (occupation.includes("酒吧")) return "🍸";
-        return "🤖";
-    }
-
-    function openTalkModal(id) {
-        selectedTalkNpcId = id;
-        const npc = currentNpcMap.get(id);
-        talkModalTitle.textContent = `与 ${npc?.name || "NPC"} 对话`;
-        renderChatFromMemory(npc?.dialogueMemory || "", npc?.name || "NPC");
-        talkModalStatus.textContent = "";
-        talkMessageInput.value = "";
-        talkModalMask.style.display = "flex";
-        talkMessageInput.focus();
-    }
-
-    function closeTalkModal() {
-        if (talkStreamSource) {
-            talkStreamSource.close();
-            talkStreamSource = null;
-        }
-        talkModalMask.style.display = "none";
-        selectedTalkNpcId = null;
-    }
-
-    function closeProfileModal() {
-        profileModalMask.style.display = "none";
-    }
-
-    async function openProfileModal(id, tab) {
-        const npc = currentNpcMap.get(id);
-        const tabTitle = tab === "assets" ? "资产详情" : (tab === "education" ? "学历详情" : "工资详情");
-        profileModalTitle.textContent = `${npc?.name || "NPC"} · ${tabTitle}`;
-        profileModalSubtitle.textContent = `${npc?.occupation || "-"} @ ${npc?.employer || "自由职业"}`;
-        profileModalContent.innerHTML = "<div class='line'>加载中...</div>";
-        profileModalMask.style.display = "flex";
-        try {
-            const resp = await fetch(`/api/town/npc/${id}/profile/extended`);
-            if (!resp.ok) throw new Error("读取详情失败");
-            const data = await resp.json();
-            if (tab === "assets") {
-                const a = data.assets || {};
-                profileModalContent.innerHTML = `
-                    <ul class="detail-list">
-                        <li>现金：${Number(a.cash || 0).toFixed(2)} ${a.currency || "元"}</li>
-                        <li>储蓄：${Number(a.savings || 0).toFixed(2)} ${a.currency || "元"}</li>
-                        <li>负债：${Number(a.debt || 0).toFixed(2)} ${a.currency || "元"}</li>
-                        <li>总资产：${Number(a.totalAssets || 0).toFixed(2)} ${a.currency || "元"}</li>
-                        <li>净资产：${Number(a.netWorth || 0).toFixed(2)} ${a.currency || "元"}</li>
-                        <li>流动性比例：${Number(a.liquidityRatio || 0).toFixed(2)}%</li>
-                        <li>负债资产比：${Number(a.debtToAssetRatio || 0).toFixed(2)}%</li>
-                        <li>财务风险等级：${a.riskLevel || "未知"}</li>
-                    </ul>
-                `;
-            } else if (tab === "education") {
-                const timeline = Array.isArray(data.educationTimeline) ? data.educationTimeline : [];
-                const items = timeline.map(t => `<li>${t.stage} · ${escapeHtml(t.school || "-")}<br><span class="line">${escapeHtml(t.focus || "")}</span></li>`).join("");
-                profileModalContent.innerHTML = `
-                    <div class="line">当前学历：${escapeHtml(data.educationLevel || "-")}，从业时长：${data.workExperienceMonths || 0} 月</div>
-                    <ul class="detail-list">${items || "<li>暂无教育轨迹</li>"}</ul>
-                `;
-            } else {
-                const c = data.compensation || {};
-                const optionPart = c.hasStockOption
-                    ? `${Number(c.monthlyStockOption || 0).toFixed(2)} ${c.currency || "元"}`
-                    : "无（当前岗位/学历/公司不提供）";
-                profileModalContent.innerHTML = `
-                    <ul class="detail-list">
-                        <li>月薪（现金部分）：${Number(c.monthlyCash || 0).toFixed(2)} ${c.currency || "元"}</li>
-                        <li>月度股票期权：${optionPart}</li>
-                        <li>月总收入：${Number(c.monthlyTotal || 0).toFixed(2)} ${c.currency || "元"}（约 ${c.monthlyDisplay || "-" }）</li>
-                        <li>年总收入：${Number(c.annualTotal || 0).toFixed(2)} ${c.currency || "元"}（约 ${c.annualDisplay || "-" }）</li>
-                        <li>收入等级：${c.payLevel || "未知"}</li>
-                    </ul>
-                `;
-            }
-        } catch (e) {
-            profileModalContent.innerHTML = `<div class="line">${escapeHtml(e.message)}</div>`;
-        }
-    }
-
-    function renderChatFromMemory(memory, npcName) {
-        chatList.innerHTML = "";
-        if (!memory || !String(memory).trim()) {
-            appendMessageBubble("npc", `${npcName} 在等你开口。`, npcName);
-            return;
-        }
-        const lines = String(memory).split("\n").filter(Boolean);
-        for (const line of lines) {
-            const parts = line.split(" | ");
-            if (parts.length >= 2) {
-                const userPart = parts[0].replace(/^玩家:\s*/, "");
-                const npcPart = parts[1].replace(new RegExp(`^${npcName}:\\s*`), "");
-                appendMessageBubble("me", userPart, "你");
-                appendMessageBubble("npc", npcPart, npcName);
-            } else {
-                appendMessageBubble("npc", line, npcName);
-            }
-        }
-        chatList.scrollTop = chatList.scrollHeight;
-    }
-
-    function appendMessageBubble(role, text, sender, typing = false) {
-        const row = document.createElement("div");
-        row.className = `msg-row ${role}`;
-        const wrap = document.createElement("div");
-        const meta = document.createElement("div");
-        meta.className = "msg-meta";
-        meta.textContent = sender || (role === "me" ? "你" : "NPC");
-        const bubble = document.createElement("div");
-        bubble.className = `msg-bubble ${typing ? "typing" : ""}`;
-        bubble.textContent = text || "";
-        wrap.appendChild(meta);
-        wrap.appendChild(bubble);
-        row.appendChild(wrap);
-        chatList.appendChild(row);
-        chatList.scrollTop = chatList.scrollHeight;
-        return bubble;
-    }
-
-    function syncGodNpcOptions(npcs) {
-        const currentValue = godNpcSelect.value;
-        godNpcSelect.innerHTML = npcs.map((n) => `<option value="${n.id}">${n.name} (${n.occupation || "-"})</option>`).join("");
-        if (currentValue) {
-            godNpcSelect.value = currentValue;
-        }
-    }
-
-    async function refreshSummary() {
-        const [summaryResp, npcsResp] = await Promise.all([
-            fetch("/api/town/stats/summary"),
-            fetch("/api/town/npcs")
-        ]);
-        if (!summaryResp.ok || !npcsResp.ok) {
-            throw new Error("读取汇总信息失败");
-        }
-        const summary = await summaryResp.json();
-        const npcs = await npcsResp.json();
-        if (!Array.isArray(npcs) || npcs.length === 0) {
-            window.location.href = "/";
-            return;
-        }
-        mTotal.textContent = summary.total ?? npcs.length ?? "-";
-        mHungry.textContent = summary.hungryCount ?? "-";
-        mTired.textContent = summary.tiredCount ?? "-";
-        mHappy.textContent = summary.happyCount ?? "-";
-        mUpdated.textContent = new Date().toLocaleTimeString();
-        renderNPCList(npcs);
-    }
-
-    function applyRealtimePayload(data) {
-        if (!data || !Array.isArray(data.npcs)) return;
-        renderNPCList(data.npcs);
-        mTotal.textContent = data.count ?? data.npcs.length;
-        mUpdated.textContent = new Date().toLocaleTimeString();
-    }
-
-    function connectSSE() {
-        if (source) source.close();
-        source = new EventSource("/api/town/npcs/status/stream");
-        connectionStatus.textContent = "SSE 连接中...";
-
-        source.addEventListener("initial", (ev) => {
-            const data = JSON.parse(ev.data);
-            applyRealtimePayload(data);
-            connectionStatus.textContent = "SSE 已连接";
-        });
-        source.addEventListener("update", (ev) => {
-            const data = JSON.parse(ev.data);
-            applyRealtimePayload(data);
-            connectionStatus.textContent = "实时更新中";
-        });
-        source.addEventListener("connected", () => {
-            connectionStatus.textContent = "SSE 已连接";
-        });
-        source.onerror = () => {
-            connectionStatus.textContent = "SSE断开，使用轮询";
-        };
-    }
-
-    async function refreshWorldBroadcast() {
-        try {
-            const resp = await fetch("/api/town/world/broadcast");
-            if (!resp.ok) {
-                return;
-            }
-            const data = await resp.json();
-            worldBroadcast.textContent = data.message || "暂无新的世界广播";
-            worldBroadcastTime.textContent = "更新时间: " + new Date(data.timestamp || Date.now()).toLocaleTimeString();
-        } catch (_) {
-        }
-    }
-
-    async function talkToNpcFromModal() {
-        const id = selectedTalkNpcId;
-        const message = talkMessageInput?.value?.trim();
-        if (!message) {
-            talkModalStatus.textContent = "请输入对话内容";
-            return;
-        }
-        const npc = currentNpcMap.get(id);
-        appendMessageBubble("me", message, "你");
-        const npcBubble = appendMessageBubble("npc", "正在输入...", npc?.name || "NPC", true);
-        talkModalStatus.textContent = "流式回复中...";
-        talkMessageInput.value = "";
-        if (talkStreamSource) {
-            talkStreamSource.close();
-            talkStreamSource = null;
-        }
-        try {
-            const url = `/api/town/npc/${id}/talk/stream?message=${encodeURIComponent(message)}`;
-            talkStreamSource = new EventSource(url);
-            let responseText = "";
-            talkStreamSource.addEventListener("chunk", (ev) => {
-                try {
-                    const payload = JSON.parse(ev.data);
-                    responseText += payload.text || "";
-                    npcBubble.classList.remove("typing");
-                    npcBubble.textContent = responseText || "...";
-                    chatList.scrollTop = chatList.scrollHeight;
-                } catch (_) {
-                }
-            });
-            talkStreamSource.addEventListener("done", (ev) => {
-                const data = JSON.parse(ev.data);
-                const tip = data.influenceActive
-                    ? `（影响强度${data.influenceWeight}，约${data.influenceDurationMinutes}分钟）`
-                    : "（短期无明显行为影响）";
-                npcBubble.textContent = `${responseText || data.response || ""} ${tip}`.trim();
-                if (data.context) {
-                    const npcInfo = currentNpcMap.get(id) || {};
-                    npcInfo.dialogueMemory = data.context;
-                    currentNpcMap.set(id, npcInfo);
-                }
-                talkModalStatus.textContent = "发送成功";
-                talkStreamSource.close();
-                talkStreamSource = null;
-            });
-            talkStreamSource.addEventListener("error", () => {
-                npcBubble.classList.remove("typing");
-                if (!responseText) npcBubble.textContent = "对话失败，请稍后重试";
-                talkModalStatus.textContent = "对话失败";
-                if (talkStreamSource) {
-                    talkStreamSource.close();
-                    talkStreamSource = null;
-                }
-            });
-        } catch (e) {
-            npcBubble.classList.remove("typing");
-            npcBubble.textContent = "对话失败，请稍后重试";
-            talkModalStatus.textContent = e.message;
-        }
-    }
-
-    async function refreshWorldNews() {
-        try {
-            const resp = await fetch("/api/town/world/news");
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const headlines = Array.isArray(data.headlines) ? data.headlines : [];
-            newsList.innerHTML = headlines.map(h => `<li>${escapeHtml(h)}</li>`).join("") || "<li>暂无新闻</li>";
-            newsBrief.textContent = data.brief || "暂无摘要";
-            newsUpdatedAt.textContent = data.updatedAt ? `更新于 ${new Date(data.updatedAt).toLocaleTimeString()}` : "";
-        } catch (_) {
-        }
-    }
-
-    function escapeHtml(text) {
-        return String(text)
-            .replaceAll("&", "&amp;")
-            .replaceAll("<", "&lt;")
-            .replaceAll(">", "&gt;");
-    }
-
-    async function popThoughtBubbles() {
-        try {
-            const resp = await fetch("/api/town/npcs/thought-bubbles");
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const bubbles = Array.isArray(data.bubbles) ? data.bubbles : [];
-            for (const b of bubbles) {
-                const node = document.createElement("div");
-                node.className = "bubble";
-                node.style.left = `${5 + Math.random() * 80}%`;
-                node.style.top = `${10 + Math.random() * 65}%`;
-                node.innerHTML = `<strong>${escapeHtml(b.npcName || "NPC")}</strong>：${escapeHtml(b.text || "")}`;
-                thoughtLayer.appendChild(node);
-                setTimeout(() => node.remove(), 9000);
-            }
-        } catch (_) {
-        }
-    }
-
-    function scheduleThoughtBubbles() {
-        const nextMs = 8000 + Math.floor(Math.random() * 9000);
-        setTimeout(async () => {
-            await popThoughtBubbles();
-            scheduleThoughtBubbles();
-        }, nextMs);
-    }
-
-    async function applyGodCommand() {
-        const id = godNpcSelect.value;
-        const instruction = godInstruction.value.trim();
-        if (!id || !instruction) {
-            godStatus.textContent = "请选择NPC并输入指令";
-            return;
-        }
-        godStatus.textContent = "上帝指令执行中...";
-        godNpcReply.textContent = "";
-        try {
-            const resp = await fetch(`/api/town/npc/${id}/god-command`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ instruction })
-            });
-            if (!resp.ok) throw new Error("上帝指令执行失败");
-            const data = await resp.json();
-            godStatus.textContent = data.message || "执行成功";
-            if (data.npcReply) {
-                godNpcReply.textContent = `${data.npcName || "NPC"}：${data.npcReply}`;
-            }
-            godInstruction.value = "";
-            await refreshSummary();
-        } catch (e) {
-            godStatus.textContent = e.message;
-        }
-    }
-
-    async function runBroadcast() {
-        setOpStatus("正在手动广播...");
-        try {
-            const msg = await postJson("/api/town/broadcast/status");
-            setOpStatus(typeof msg === "string" ? msg : "广播完成");
-        } catch (e) {
-            setOpStatus(e.message, true);
-        }
-    }
-
-    async function endSimulationAndBack() {
-        setOpStatus("正在结束模拟并清空数据...");
-        try {
-            const data = await postJson("/api/town/simulation/end");
-            setOpStatus(`${data.message}（已清空 ${data.deletedCount} 人）`);
-            setTimeout(() => {
-                window.location.href = "/";
-            }, 400);
-        } catch (e) {
-            setOpStatus(e.message, true);
-        }
-    }
-
-    document.getElementById("broadcastBtn").addEventListener("click", runBroadcast);
-    document.getElementById("reloadBtn").addEventListener("click", () => refreshSummary().catch(err => setOpStatus(err.message, true)));
-    document.getElementById("endSimBtn").addEventListener("click", endSimulationAndBack);
-    document.getElementById("godApplyBtn").addEventListener("click", applyGodCommand);
-    document.getElementById("closeTalkModalBtn").addEventListener("click", closeTalkModal);
-    document.getElementById("sendTalkBtn").addEventListener("click", talkToNpcFromModal);
-    talkMessageInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            talkToNpcFromModal();
-        }
-    });
-    talkModalMask.addEventListener("click", (e) => { if (e.target === talkModalMask) closeTalkModal(); });
-    window.openTalkModal = openTalkModal;
-    window.openProfileModal = openProfileModal;
-    document.getElementById("closeProfileModalBtn").addEventListener("click", closeProfileModal);
-    profileModalMask.addEventListener("click", (e) => { if (e.target === profileModalMask) closeProfileModal(); });
-
-    refreshSummary().catch(err => setOpStatus(err.message, true));
-    refreshWorldBroadcast();
-    refreshWorldNews();
-    connectSSE();
-    setInterval(() => {
-        if (connectionStatus.textContent.includes("轮询")) {
-            refreshSummary().catch(() => {});
-        }
-    }, 5000);
-    setInterval(refreshWorldBroadcast, 8000);
-    setInterval(refreshWorldNews, 15000);
-    scheduleThoughtBubbles();
-</script>
+<script src="/js/runtime.js"></script>
 </body>
 </html>

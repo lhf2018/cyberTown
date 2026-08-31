@@ -7,72 +7,21 @@ import dev.langchain4j.service.UserMessage;
 public interface AIDecisionAssistant {
 
     @SystemMessage("""
-            你是一个赛博朋克小镇的AI决策专家。请根据NPC的状态、想法和环境情况，
-            分析NPC的需求，选择合适的工具进行检查，然后做出最佳决策。
-            
-            特别要求：每次决策必须同时生成一个新的内心想法。
-            
-            输出格式必须严格按照以下结构：
-            
-            【决策分析】
-            [这里分析NPC的状态、想法和环境]
-            
-            【最终决策】
-            [这里给出具体的行动建议，如：去吃饭、休息、工作等]
-            
-            【新想法】
-            [这里生成一个新的内心想法，反映NPC执行决策时的内心活动]
-            
-            【决策理由】
-            [这里解释为什么做出这个决策，如何考虑NPC的状态和想法]
-            
-            想法生成要求：
-            1. 基于NPC的性格、职业、当前状态
-            2. 反映执行决策时的内心感受
-            3. 可以包含情绪、期待、顾虑等
-            4. 保持自然、真实、有人情味
-            5. 语言简洁，一句话即可
-            
-            示例：
-            决策分析：程序员杰克能量较低，正在加班，想法显示疲劳...
-            最终决策：回家休息
-            新想法：终于可以离开办公室了，希望路上不要太堵
-            决策理由：能量低于40%，想法显示疲劳，工作时间已结束...
+            你是赛博朋克小镇的 NPC 决策助手。
+            可根据需要调用工具检查需求/日程/社交/地点，然后给出决策。
+
+            最终回复必须是【纯 JSON 对象】，不要 Markdown，不要代码围栏，不要其它说明。
+            字段：
+            {
+              "decisionAnalysis": "简短分析",
+              "finalDecision": "具体行动（短句，如：去仿生餐厅吃饭）",
+              "newThought": "一句内心独白",
+              "decisionReason": "一句决策理由"
+            }
+            约束：finalDecision / newThought / decisionReason 用中文，尽量简短。
             """)
-    DecisionWithThought analyzeAndDecide(
+    String analyzeAndDecide(
             @MemoryId String sessionId,
-            @UserMessage("""
-                    请为以下NPC做出决策并生成新想法：
-                    
-                    NPC档案：
-                    - 姓名：{{npcName}}
-                    - 职业：{{occupation}}
-                    - 性格：{{personality}}
-                    - 当前位置：{{location}}
-                    
-                    当前状态：
-                    - 能量：{{energy}}%
-                    - 饥饿：{{hunger}}%
-                    - 心情：{{happiness}}%
-                    - 社交需求：{{socialNeed}}%
-                    
-                    当前想法（最近想法）：
-                    {{recentThoughts}}
-
-                    玩家对话影响（可能为空）：
-                    - 是否生效：{{dialogueInfluenceActive}}
-                    - 影响内容：{{dialogueInfluence}}
-                    - 影响强度：{{dialogueInfluenceWeight}}
-                    - 预计失效时间：{{dialogueInfluenceExpiresAt}}
-
-                    世界新闻摘要（会影响社会氛围与机会风险）：
-                    {{globalNewsBrief}}
-                    
-                    环境信息：
-                    - 当前时间：{{hour}}:00 ({{timeOfDay}})
-                    - 游戏时间：{{currentTime}}
-                    
-                    请按指定格式输出，包含决策、新想法和理由。
-                    """) String request
+            @UserMessage String request
     );
 }

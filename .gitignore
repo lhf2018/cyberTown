@@ -38,3 +38,8 @@ build/
 ### Mac OS ###
 .DS_Store
 /.idea/
+
+### Local data / secrets ###
+/data/
+*.mv.db
+*.trace.db

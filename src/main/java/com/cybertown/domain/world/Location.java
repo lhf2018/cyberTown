@@ -15,18 +15,16 @@ import jakarta.persistence.Table;
 @Table(name = "locations")
 @Data
 public class Location {
-    
-    @Id  // 主键
-    private String id;           // 位置唯一ID
-    
-    // 位置属性
-    private String name;         // 位置名称：科技公司、老王家酒吧等
-    private String type;         // 位置类型：HOME, WORK, MARKET, BAR, STREET
-    private String description;  // 位置描述
-    
-    // 容量相关
-    private int capacity;        // 最大容纳人数
-    
-    // 注意：这个实体比较简单，实际项目中可能需要更多字段
-    // 如坐标、开放时间、特殊事件等
+
+    @Id
+    private String id;
+
+    private String name;
+    private String type;
+    private String description;
+    private int capacity;
+
+    /** SVG 地图坐标（0-100 百分比） */
+    private double mapX;
+    private double mapY;
 }

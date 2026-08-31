@@ -56,6 +56,13 @@ public class NPC {
     private LocalDateTime dialogueInfluenceExpiresAt;
     private int dialogueInfluenceWeight;
 
+    // 决策可观测
+    @Column(length = 500)
+    private String lastDecision;
+    @Column(length = 1000)
+    private String lastDecisionReason;
+    private LocalDateTime lastDecisionAt;
+
     // 创建时自动设置时间
     @PrePersist
     protected void onCreate() {

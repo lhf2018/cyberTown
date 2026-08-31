@@ -3,6 +3,10 @@ package com.cybertown.graph;
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.world.WorldState;
 import com.cybertown.service.NewsService;
+import com.cybertown.service.SocialService;
+import com.cybertown.service.WorldEventService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -15,10 +19,11 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * AI驱动的NPC行为决策图
- * 真正利用大模型进行分析和决策
  */
 @Slf4j
 @Component
@@ -28,20 +33,29 @@ public class NPCBehaviorGraph {
     private final NPCDecisionTools decisionTools;
     private final ChatLanguageModel chatLanguageModel;
     private final NewsService newsService;
+    private final WorldEventService worldEventService;
+    private final SocialService socialService;
+    private final ObjectMapper objectMapper;
 
     private AIDecisionAssistant aiDecisionAssistant;
 
-    /**
-     * 初始化AI决策助手
-     */
+    private static final Pattern SECTION = Pattern.compile(
+            "【\\s*(决策分析|最终决策|新想法|决策理由)\\s*】\\s*([\\s\\S]*?)(?=【\\s*(?:决策分析|最终决策|新想法|决策理由)\\s*】|$)"
+    );
+
     @PostConstruct
     public void init() {
         try {
-            ChatMemoryProvider chatMemoryProvider = memoryId -> MessageWindowChatMemory.withMaxMessages(10);
+            if (chatLanguageModel == null) {
+                log.warn("ChatLanguageModel 为空，AI 决策不可用，将使用规则引擎");
+                this.aiDecisionAssistant = null;
+                return;
+            }
+            ChatMemoryProvider chatMemoryProvider = memoryId -> MessageWindowChatMemory.withMaxMessages(6);
 
             this.aiDecisionAssistant = AiServices.builder(AIDecisionAssistant.class)
                     .chatLanguageModel(chatLanguageModel)
-                    .chatMemoryProvider(chatMemoryProvider)  // 使用 ChatMemoryProvider
+                    .chatMemoryProvider(chatMemoryProvider)
                     .tools(decisionTools)
                     .build();
 
@@ -53,9 +67,6 @@ public class NPCBehaviorGraph {
         }
     }
 
-    /**
-     * AI驱动决策（主入口）
-     */
     public NPCDecisionTools.DecisionResult decideWithAI(NPC npc, WorldState world) {
         log.info("🤖 AI决策开始: {}", npc.getName());
 
@@ -66,79 +77,18 @@ public class NPCBehaviorGraph {
         if (aiDecisionAssistant == null) {
             String ruleDecision = decideWithRules(npc, world);
             result.setDecision(ruleDecision);
+            result.setNewThought(null);
             result.setReason("规则引擎决策（AI未启用）");
+            result.setSource("规则引擎");
             return result;
         }
 
         try {
-            // 准备数据
-            String npcName = npc.getName();
             String sessionId = "ai_" + npc.getId() + "_" + System.currentTimeMillis();
+            String request = buildRequest(npc, world);
+            String raw = aiDecisionAssistant.analyzeAndDecide(sessionId, request);
+            DecisionWithThought aiResponse = parseDecisionResponse(raw);
 
-            // 获取最近的想法（最多3个）
-            String recentThoughts = getRecentThoughts(npc);
-
-            // 构建请求
-            String request = String.format("""
-                            npcName=%s
-                            occupation=%s
-                            personality=%s
-                            location=%s
-                            energy=%d
-                            hunger=%d
-                            happiness=%d
-                            socialNeed=%d
-                            money=%.2f
-                            savings=%.2f
-                            debt=%.2f
-                            skillLevel=%d
-                            knowledgeLevel=%d
-                            health=%d
-                            reputation=%d
-                            educationLevel=%s
-                            workExperience=%d
-                            recentThoughts=%s
-                            dialogueInfluenceActive=%s
-                            dialogueInfluence=%s
-                            dialogueInfluenceWeight=%d
-                            dialogueInfluenceExpiresAt=%s
-                            globalNewsBrief=%s
-                            hour=%d
-                            timeOfDay=%s
-                            currentTime=%s
-                            """,
-                    npc.getName(),
-                    npc.getOccupation(),
-                    npc.getPersonality(),
-                    npc.getCurrentLocation(),
-                    npc.getStats().getEnergy(),
-                    npc.getStats().getHunger(),
-                    npc.getStats().getHappiness(),
-                    npc.getStats().getSocialNeed(),
-                    npc.getStats().getMoney(),
-                    npc.getStats().getSavings(),
-                    npc.getStats().getDebt(),
-                    npc.getStats().getSkillLevel(),
-                    npc.getStats().getKnowledgeLevel(),
-                    npc.getStats().getHealth(),
-                    npc.getStats().getReputation(),
-                    npc.getStats().getEducationLevel(),
-                    npc.getStats().getWorkExperience(),
-                    recentThoughts,
-                    npc.hasActiveDialogueInfluence(),
-                    npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluence() : "无",
-                    npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceWeight() : 0,
-                    npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceExpiresAt() : "无",
-                    newsService.getNewsBrief(),
-                    world.getGameTime().getHour(),
-                    world.getTimeOfDay(),
-                    world.getGameTime().toString()
-            );
-
-            // 让AI分析并决策
-            DecisionWithThought aiResponse = aiDecisionAssistant.analyzeAndDecide(sessionId, request);
-
-            // 提取结果
             String decision = extractDecision(aiResponse);
             String newThought = extractNewThought(aiResponse);
             String reason = extractDecisionReason(aiResponse);
@@ -149,182 +99,276 @@ public class NPCBehaviorGraph {
             result.setSource("AI决策");
             result.setAiAnalysis(aiResponse.getDecisionAnalysis());
 
-            log.info("✅ AI决策完成: {} -> {}", npcName, decision);
-            log.debug("AI完整响应: {}", aiResponse);
-
+            log.info("✅ AI决策完成: {} -> {}", npc.getName(), decision);
             return result;
 
         } catch (Exception e) {
             log.error("❌ AI决策失败: {}", e.getMessage());
-            // 降级到规则引擎
             String ruleDecision = decideWithRules(npc, world);
             result.setDecision(ruleDecision);
-            result.setReason("规则引擎决策（AI失败: " + e.getMessage() + ")");
+            result.setNewThought(null);
+            result.setReason("规则引擎决策（AI暂不可用）");
+            result.setSource("规则引擎");
             return result;
         }
     }
 
-    /**
-     * 获取最近的想法
-     */
+    private String buildRequest(NPC npc, WorldState world) {
+        return String.format("""
+                        请为以下 NPC 决策，只输出 JSON。
+                        姓名=%s
+                        职业=%s
+                        性格=%s
+                        位置=%s
+                        能量=%d
+                        饥饿=%d
+                        心情=%d
+                        社交需求=%d
+                        金钱=%.2f
+                        储蓄=%.2f
+                        负债=%.2f
+                        技能=%d
+                        知识=%d
+                        健康=%d
+                        声望=%d
+                        学历=%s
+                        工龄月=%d
+                        近期想法=%s
+                        对话影响生效=%s
+                        对话影响=%s
+                        对话影响强度=%d
+                        对话影响失效=%s
+                        新闻摘要=%s
+                        活跃世界事件=%s
+                        同地点熟人=%s
+                        小时=%d
+                        时段=%s
+                        天气=%s
+                        游戏时间=%s
+                        """,
+                npc.getName(),
+                npc.getOccupation(),
+                npc.getPersonality(),
+                npc.getCurrentLocation(),
+                npc.getStats().getEnergy(),
+                npc.getStats().getHunger(),
+                npc.getStats().getHappiness(),
+                npc.getStats().getSocialNeed(),
+                npc.getStats().getMoney(),
+                npc.getStats().getSavings(),
+                npc.getStats().getDebt(),
+                npc.getStats().getSkillLevel(),
+                npc.getStats().getKnowledgeLevel(),
+                npc.getStats().getHealth(),
+                npc.getStats().getReputation(),
+                npc.getStats().getEducationLevel(),
+                npc.getStats().getWorkExperience(),
+                getRecentThoughts(npc),
+                npc.hasActiveDialogueInfluence(),
+                npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluence() : "无",
+                npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceWeight() : 0,
+                npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceExpiresAt() : "无",
+                newsService.getNewsBrief(),
+                worldEventService.activeWorldBriefSafe(),
+                socialService.summarizeNearbyRelations(npc),
+                world.getGameTime().getHour(),
+                world.getTimeOfDay(),
+                world.getWeather(),
+                world.getGameTime().toString()
+        );
+    }
+
+    DecisionWithThought parseDecisionResponse(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalStateException("AI 返回为空");
+        }
+        String text = stripMarkdownFence(raw.trim());
+
+        try {
+            String json = extractJsonObject(text);
+            JsonNode node = objectMapper.readTree(json);
+            if (node != null && node.isObject()) {
+                DecisionWithThought d = new DecisionWithThought();
+                d.setDecisionAnalysis(textOr(node, "decisionAnalysis", "analysis", "决策分析"));
+                d.setFinalDecision(textOr(node, "finalDecision", "decision", "最终决策"));
+                d.setNewThought(textOr(node, "newThought", "thought", "新想法"));
+                d.setDecisionReason(textOr(node, "decisionReason", "reason", "决策理由"));
+                if (d.getFinalDecision() != null && !d.getFinalDecision().isBlank()) {
+                    return d;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("JSON 解析决策失败，尝试分段文本: {}", e.getMessage());
+        }
+
+        DecisionWithThought fromSections = parseSectionText(text);
+        if (fromSections.getFinalDecision() != null && !fromSections.getFinalDecision().isBlank()) {
+            return fromSections;
+        }
+
+        DecisionWithThought fallback = new DecisionWithThought();
+        fallback.setFinalDecision(firstLine(text));
+        fallback.setDecisionReason("模型未按 JSON 返回，已做宽松解析");
+        fallback.setNewThought(null);
+        fallback.setDecisionAnalysis(text);
+        return fallback;
+    }
+
+    private DecisionWithThought parseSectionText(String text) {
+        DecisionWithThought d = new DecisionWithThought();
+        Matcher m = SECTION.matcher(text);
+        while (m.find()) {
+            String key = m.group(1).trim();
+            String val = m.group(2).trim();
+            switch (key) {
+                case "决策分析" -> d.setDecisionAnalysis(val);
+                case "最终决策" -> d.setFinalDecision(val);
+                case "新想法" -> d.setNewThought(val);
+                case "决策理由" -> d.setDecisionReason(val);
+                default -> {
+                }
+            }
+        }
+        if (d.getFinalDecision() == null) {
+            Matcher loose = Pattern.compile("最终决策[:：]\\s*(.+)").matcher(text);
+            if (loose.find()) {
+                d.setFinalDecision(loose.group(1).trim());
+            }
+        }
+        return d;
+    }
+
+    private static String textOr(JsonNode node, String... fields) {
+        for (String f : fields) {
+            JsonNode v = node.get(f);
+            if (v != null && !v.isNull()) {
+                String t = v.asText("").trim();
+                if (!t.isBlank()) {
+                    return t;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String stripMarkdownFence(String raw) {
+        String t = raw.trim();
+        if (t.startsWith("```")) {
+            int firstNl = t.indexOf('\n');
+            int lastFence = t.lastIndexOf("```");
+            if (firstNl >= 0 && lastFence > firstNl) {
+                t = t.substring(firstNl + 1, lastFence).trim();
+            }
+        }
+        return t;
+    }
+
+    private static String extractJsonObject(String text) {
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return text.substring(start, end + 1);
+        }
+        return text;
+    }
+
+    private static String firstLine(String text) {
+        String t = text.replace('\r', '\n').trim();
+        int nl = t.indexOf('\n');
+        return nl >= 0 ? t.substring(0, nl).trim() : t;
+    }
+
     private String getRecentThoughts(NPC npc) {
         if (npc.getCurrentThoughts() == null || npc.getCurrentThoughts().isEmpty()) {
             return "暂无想法";
         }
-
-        // 取最近3个想法
         int maxThoughts = Math.min(3, npc.getCurrentThoughts().size());
         List<String> recent = new ArrayList<>();
-
-        for (int i = 0; i < maxThoughts; i++) {
+        int start = Math.max(0, npc.getCurrentThoughts().size() - maxThoughts);
+        for (int i = start; i < npc.getCurrentThoughts().size(); i++) {
             recent.add(npc.getCurrentThoughts().get(i));
         }
-
         return String.join("；", recent);
     }
 
-    /**
-     * 从AI响应中提取决策
-     */
     private String extractDecision(DecisionWithThought response) {
         if (response == null || response.getFinalDecision() == null) {
             return "日常活动";
         }
-
-        String decision = response.getFinalDecision().trim();
-
-        // 清理可能的格式标记
-        decision = decision.replace("【最终决策】", "")
+        String decision = response.getFinalDecision().trim()
+                .replace("【最终决策】", "")
                 .replace("最终决策：", "")
                 .replace("决策：", "")
                 .trim();
-
-        // 只取第一行或第一个句子
         if (decision.contains("\n")) {
             decision = decision.split("\n")[0].trim();
         }
         if (decision.contains("。")) {
             decision = decision.split("。")[0].trim();
         }
-
         return decision.isEmpty() ? "日常活动" : decision;
     }
 
-    /**
-     * 从AI响应中提取新想法
-     */
     private String extractNewThought(DecisionWithThought response) {
         if (response == null || response.getNewThought() == null) {
             return null;
         }
-
-        String thought = response.getNewThought().trim();
-
-        // 清理可能的格式标记
-        thought = thought.replace("【新想法】", "")
+        String thought = response.getNewThought().trim()
+                .replace("【新想法】", "")
                 .replace("新想法：", "")
                 .replace("想法：", "")
                 .trim();
-
-        // 只取第一句
         if (thought.contains("\n")) {
             thought = thought.split("\n")[0].trim();
         }
-        if (thought.contains("。")) {
-            thought = thought.split("。")[0].trim();
-        }
-
         return thought.isEmpty() ? null : thought;
     }
 
-    /**
-     * 从AI响应中提取决策理由
-     */
     private String extractDecisionReason(DecisionWithThought response) {
         if (response == null || response.getDecisionReason() == null) {
             return "综合考虑NPC状态和环境";
         }
-
-        String reason = response.getDecisionReason().trim();
-
-        // 清理可能的格式标记
-        reason = reason.replace("【决策理由】", "")
+        String reason = response.getDecisionReason().trim()
+                .replace("【决策理由】", "")
                 .replace("决策理由：", "")
                 .replace("理由：", "")
                 .trim();
-
+        if (reason.length() > 180) {
+            reason = reason.substring(0, 179) + "…";
+        }
         return reason.isEmpty() ? "综合考虑NPC状态和环境" : reason;
     }
 
-    /**
-     * 规则引擎决策（备选方案）
-     */
     public String decideWithRules(NPC npc, WorldState world) {
         log.info("⚙️ 规则引擎决策: {}", npc.getName());
-
         try {
             if (npc.hasActiveDialogueInfluence() && npc.getDialogueInfluenceWeight() >= 60) {
-                String influence = npc.getDialogueInfluence().trim();
-                return "优先响应玩家建议：" + influence;
+                return "优先响应玩家建议：" + npc.getDialogueInfluence().trim();
             }
-
-            // 使用原有的决策逻辑
-            String npcName = npc.getName();
             int energy = npc.getStats().getEnergy();
             int hunger = npc.getStats().getHunger();
             int happiness = npc.getStats().getHappiness();
             int socialNeed = npc.getStats().getSocialNeed();
-
             int hour = world.getGameTime().getHour();
-            String location = npc.getCurrentLocation();
+            String location = npc.getCurrentLocation() == null ? "" : npc.getCurrentLocation();
 
-            // 简单的规则引擎
-            if (energy < 20) {
-                return "立即休息";
-            }
-            if (hunger > 85) {
-                return "立即吃饭";
-            }
-            if (energy < 40) {
-                return "考虑休息";
-            }
-            if (hunger > 65) {
-                return "去吃饭";
-            }
-
-            // 工作时间判断
-            boolean isWorkTime = isWorkTime(npc.getOccupation(), hour);
-            if (isWorkTime) {
-                return "继续工作";
-            }
-
-            // 社交需求
-            if (socialNeed > 80) {
-                return "进行社交活动";
-            }
-
-            // 根据位置选择
-            if (location.contains("酒吧") || location.contains("娱乐")) {
-                return "享受娱乐活动";
-            }
-
-            if (happiness < 30) {
-                return "改善心情";
-            }
-
+            if (energy < 20) return "立即休息";
+            if (hunger > 85) return "立即吃饭";
+            if (energy < 40) return "考虑休息";
+            if (hunger > 65) return "去吃饭";
+            if (isWorkTime(npc.getOccupation(), hour)) return "继续工作";
+            if (socialNeed > 80) return "进行社交活动";
+            if (location.contains("酒吧") || location.contains("娱乐")) return "享受娱乐活动";
+            if (happiness < 30) return "改善心情";
             return "日常活动";
-
         } catch (Exception e) {
             log.error("规则引擎决策失败", e);
             return "保持现状";
         }
     }
 
-    /**
-     * 判断是否是工作时间
-     */
     private boolean isWorkTime(String occupation, int hour) {
-        return switch (occupation) {
+        return switch (occupation == null ? "" : occupation) {
             case "程序员", "设计师", "医生", "警察" -> hour >= 9 && hour < 18;
             case "酒吧老板" -> hour >= 16 || hour < 2;
             default -> hour >= 9 && hour < 18;
