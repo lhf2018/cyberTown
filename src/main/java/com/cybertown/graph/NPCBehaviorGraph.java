@@ -2,6 +2,7 @@ package com.cybertown.graph;
 
 import com.cybertown.domain.npc.NPC;
 import com.cybertown.domain.world.WorldState;
+import com.cybertown.service.AiMetricsService;
 import com.cybertown.service.NewsService;
 import com.cybertown.service.SocialService;
 import com.cybertown.service.WorldEventService;
@@ -36,6 +37,7 @@ public class NPCBehaviorGraph {
     private final WorldEventService worldEventService;
     private final SocialService socialService;
     private final ObjectMapper objectMapper;
+    private final AiMetricsService aiMetricsService;
 
     private AIDecisionAssistant aiDecisionAssistant;
 
@@ -53,13 +55,14 @@ public class NPCBehaviorGraph {
             }
             ChatMemoryProvider chatMemoryProvider = memoryId -> MessageWindowChatMemory.withMaxMessages(6);
 
+            // 不注册 tools：DeepSeek 易陷入反复调工具，触发「exceeded 10 sequential tool executions」。
+            // 预检由 buildRequest 在 Java 侧各调用一次后写入提示词。
             this.aiDecisionAssistant = AiServices.builder(AIDecisionAssistant.class)
                     .chatLanguageModel(chatLanguageModel)
                     .chatMemoryProvider(chatMemoryProvider)
-                    .tools(decisionTools)
                     .build();
 
-            log.info("🤖 AI决策助手初始化成功 - 使用大模型驱动决策");
+            log.info("🤖 AI决策助手初始化成功 - 使用大模型驱动决策（无工具循环）");
 
         } catch (Exception e) {
             log.error("AI决策助手初始化失败: {}", e.getMessage(), e);
@@ -86,7 +89,9 @@ public class NPCBehaviorGraph {
         try {
             String sessionId = "ai_" + npc.getId() + "_" + System.currentTimeMillis();
             String request = buildRequest(npc, world);
+            long t0 = System.currentTimeMillis();
             String raw = aiDecisionAssistant.analyzeAndDecide(sessionId, request);
+            long latency = System.currentTimeMillis() - t0;
             DecisionWithThought aiResponse = parseDecisionResponse(raw);
 
             String decision = extractDecision(aiResponse);
@@ -98,12 +103,14 @@ public class NPCBehaviorGraph {
             result.setReason(reason);
             result.setSource("AI决策");
             result.setAiAnalysis(aiResponse.getDecisionAnalysis());
+            aiMetricsService.recordSuccess("decision", npc.getName(), latency, decision);
 
             log.info("✅ AI决策完成: {} -> {}", npc.getName(), decision);
             return result;
 
         } catch (Exception e) {
             log.error("❌ AI决策失败: {}", e.getMessage());
+            aiMetricsService.recordFailure("decision", npc.getName(), 0, e.getMessage());
             String ruleDecision = decideWithRules(npc, world);
             result.setDecision(ruleDecision);
             result.setNewThought(null);
@@ -114,8 +121,33 @@ public class NPCBehaviorGraph {
     }
 
     private String buildRequest(NPC npc, WorldState world) {
+        String nearby = socialService.summarizeNearbyRelations(npc);
+        int hour = world.getGameTime().getHour();
+        String timeOfDay = world.getTimeOfDay();
+
+        NPCDecisionTools.BasicNeedsResult needs = decisionTools.checkBasicNeeds(
+                npc.getName(),
+                npc.getStats().getEnergy(),
+                npc.getStats().getHunger(),
+                npc.getStats().getHappiness(),
+                npc.getStats().getSocialNeed()
+        );
+        NPCDecisionTools.ScheduleResult schedule = decisionTools.checkSchedule(
+                npc.getOccupation(), hour, timeOfDay
+        );
+        NPCDecisionTools.SocialResult social = decisionTools.checkSocial(
+                npc.getPersonality(),
+                npc.getStats().getSocialNeed(),
+                npc.getStats().getHappiness(),
+                npc.getName(),
+                nearby
+        );
+        NPCDecisionTools.LocationResult location = decisionTools.checkLocation(
+                npc.getCurrentLocation(), timeOfDay, npc.getName()
+        );
+
         return String.format("""
-                        请为以下 NPC 决策，只输出 JSON。
+                        请为以下 NPC 决策，只输出 JSON（不要调用工具）。
                         姓名=%s
                         职业=%s
                         性格=%s
@@ -145,6 +177,11 @@ public class NPCBehaviorGraph {
                         时段=%s
                         天气=%s
                         游戏时间=%s
+                        ---工具预检（已由系统计算，直接参考）---
+                        需求：%s | 紧急=%s | 建议=%s
+                        日程：%s | 工作时间=%s | %s
+                        社交：%s | 优先级=%s | 建议活动=%s
+                        地点：%s | 类型=%s
                         """,
                 npc.getName(),
                 npc.getOccupation(),
@@ -170,12 +207,27 @@ public class NPCBehaviorGraph {
                 npc.hasActiveDialogueInfluence() ? npc.getDialogueInfluenceExpiresAt() : "无",
                 newsService.getNewsBrief(),
                 worldEventService.activeWorldBriefSafe(),
-                socialService.summarizeNearbyRelations(npc),
-                world.getGameTime().getHour(),
-                world.getTimeOfDay(),
+                nearby,
+                hour,
+                timeOfDay,
                 world.getWeather(),
-                world.getGameTime().toString()
+                world.getGameTime().toString(),
+                nullToDash(needs.getAnalysis()),
+                needs.isHasUrgentNeed(),
+                nullToDash(needs.getSuggestedAction()),
+                nullToDash(schedule.getSuggestion()),
+                schedule.isWorkTime(),
+                nullToDash(schedule.getReason()),
+                nullToDash(social.getSuggestion()),
+                nullToDash(social.getPriority()),
+                nullToDash(social.getSuggestedActivity()),
+                nullToDash(location.getSuggestion()),
+                nullToDash(location.getLocationType())
         );
+    }
+
+    private static String nullToDash(String s) {
+        return s == null || s.isBlank() ? "-" : s;
     }
 
     DecisionWithThought parseDecisionResponse(String raw) {

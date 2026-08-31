@@ -16,9 +16,11 @@ NPC 具备可持久化状态、对话记忆、动态决策、同地点社交、�
 - 不定时“心里话气泡”
 - 上帝模式（自然语言）支持修改位置、目标、数值、学历、工资、关系
 - **旁观模式 + 干预配额**（对话/上帝次数限制）
-- **城区地图**（固定区块布局 + 人数徽章）、**今日大事时间线**、决策理由展示
+- **城区地图**（固定区块布局 + 人数徽章 + 关系连线）
+- **今日大事 / 事件回放 / 周目标剧情**
+- **决策洞察**（AI 调用看板、世界权重、最近决策对比）
+- **命名存档槽** + JSON 快照导出/导入 + **日报海报** PNG
 - 资产详情 / 学历详情 / 工资详情 / 人际关系弹框
-- **快照导出/导入**（多世界 lite）
 - H2 文件库持久化（重启不丢失）
 
 ## 技术栈
@@ -34,11 +36,11 @@ NPC 具备可持久化状态、对话记忆、动态决策、同地点社交、�
 
 - JDK 17+
 - Maven 3.6+
-- 可用的 DeepSeek API Key（环境变量 `DEEPSEEK_API_KEY`）
+- 可用的 DeepSeek API Key
 
-### 2) 配置
+### 2) 配置密钥（二选一）
 
-在环境中设置：
+**推荐：环境变量**
 
 ```bash
 # Windows PowerShell
@@ -46,7 +48,18 @@ $env:DEEPSEEK_API_KEY = "sk-..."
 $env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.18.8-hotspot"
 ```
 
-或编辑 `src/main/resources/application.yml` 中的 `spring.ai.openai.api-key`（勿提交真实密钥）。
+**或：本地覆盖文件（已 gitignore，勿提交）**
+
+创建 `src/main/resources/application-local.yml`：
+
+```yaml
+spring:
+  ai:
+    openai:
+      api-key: sk-...
+```
+
+默认 `spring.profiles.active=local`。占位符 `todo` 会被拒绝，不会拿去调 API。
 
 ### 3) 启动
 
@@ -57,7 +70,7 @@ mvn clean spring-boot:run
 ### 4) 页面入口
 
 - 初始化页：`http://localhost:8080/`
-- 运行页：`http://localhost:8080/runtime.html`（地图 / 大事 / 旁观 / 居民）
+- 运行页：`http://localhost:8080/runtime.html`（总览 / 地图 / 回放 / 决策洞察 / 存档 / 居民）
 - AI 初始化页：`http://localhost:8080/ai-init.html`
 - H2 控制台：`http://localhost:8080/h2-console`
 
@@ -67,9 +80,9 @@ mvn clean spring-boot:run
 
 - 数据源：`jdbc:h2:file:./data/cybertown;AUTO_SERVER=TRUE`
 - 表结构策略：`ddl-auto: update`
-- 不再使用 `create-drop`
+- 命名存档：`data/saves/`（与 `data/` 一并 gitignore）
 
-NPC 关键信息（包括对话记忆、学历历史、想法列表、资产/工资相关字段、决策理由）与关系、小镇事件会落库并在重启后保留。
+NPC 关键信息（包括对话记忆、学历历史、想法列表、资产/工资相关字段、决策理由与来源）与关系、小镇事件会落库并在重启后保留。
 
 ## 核心接口（常用）
 
@@ -99,12 +112,22 @@ NPC 关键信息（包括对话记忆、学历历史、想法列表、资产/工
 - `GET /api/town/events?limit=`
 - `GET /api/town/locations`
 - `GET /api/town/npcs/thought-bubbles`
+- `GET /api/town/replay?limit=`（事件时间升序，便于回放）
 
-### 关系 / 模式 / 快照
+### 关系 / 模式 / 快照 / 存档
 
 - `GET /api/town/npc/{id}/relationships`
+- `GET /api/town/relationships/graph`
 - `GET /api/town/mode` / `POST /api/town/mode`（`spectator` | `operator`）
 - `GET /api/town/snapshot` / `POST /api/town/snapshot/import`
+- `GET|POST /api/town/saves`、`POST /api/town/saves/{name}/load`、`DELETE /api/town/saves/{name}`
+
+### 决策洞察 / 周目标 / 日报
+
+- `GET /api/town/decision/insights`（NPC 最近决策对比 + 世界权重摘要）
+- `GET /api/town/metrics/ai`（AI 调用成功/失败/耗时）
+- `GET|POST /api/town/quest`、`POST /api/town/quest/reset`
+- `GET /api/town/report/daily`
 
 ### 详情面板
 
@@ -135,21 +158,23 @@ POST /api/town/npc/npc-1/god-command
 - 学历详情为持久化字段，支持在上帝模式下增量修改
 - 世界事件会影响社交触发率、能量消耗、投资收益与部分职业情绪
 - 旁观模式不可对话/上帝；运营模式默认对话 20 次、上帝 5 次（结束模拟重置）
-- AI 决策输出需为 JSON；解析失败降级规则引擎，不向页面展示异常栈
+- AI 决策：Java 预检需求/日程/社交/地点后 **单次** LLM 出 JSON；不注册连续 tools（避免 10 次工具上限）
+- 解析失败降级规则引擎，不向页面展示异常栈
 
 ## 项目结构（简化）
 
 ```text
 src/main/java/com/cybertown/
   controller/       # API 与页面数据聚合
-  service/          # AI、模拟、社交、世界事件、人生事件等
+  service/          # AI、模拟、社交、世界事件、任务、存档、指标等
   domain/npc/       # NPC、关系
   domain/world/     # 地点、世界状态、小镇事件
   repository/       # JPA Repository
-  graph/            # AI 决策图与工具
+  graph/            # AI 决策（无工具循环）与预检工具
 src/main/resources/
   static/           # runtime.html + css/ + js/
   application.yml
+  application-local.yml  # 本地密钥（gitignore，勿提交）
 docs/wiki/
   README.md
   iteration-log.md

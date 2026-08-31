@@ -7,6 +7,7 @@ import com.cybertown.domain.world.Location;
 import com.cybertown.domain.world.TownEvent;
 import com.cybertown.repository.LocationRepository;
 import com.cybertown.repository.NPCRepository;
+import com.cybertown.repository.RelationshipRepository;
 import com.cybertown.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,10 @@ public class TownController {
     private final ModeService modeService;
     private final SnapshotService snapshotService;
     private final ObjectMapper objectMapper;
+    private final RelationshipRepository relationshipRepository;
+    private final QuestService questService;
+    private final AiMetricsService aiMetricsService;
+    private final SaveSlotService saveSlotService;
 
     // SSE emitters 列表，用于HTTP长连接推送
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
@@ -498,6 +503,174 @@ public class TownController {
         return snapshotService.importEntities(npcs, relationships, events);
     }
 
+    @GetMapping("/relationships/graph")
+    public Map<String, Object> relationshipGraph() {
+        List<NPC> npcs = npcRepository.findAll();
+        Map<String, NPC> byId = new HashMap<>();
+        for (NPC n : npcs) {
+            byId.put(n.getId(), n);
+        }
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        for (NPC n : npcs) {
+            Map<String, Object> node = new LinkedHashMap<>();
+            node.put("id", n.getId());
+            node.put("name", n.getName());
+            node.put("occupation", n.getOccupation());
+            node.put("location", n.getCurrentLocation());
+            nodes.add(node);
+        }
+        List<Map<String, Object>> edges = new ArrayList<>();
+        for (Relationship r : relationshipRepository.findAll()) {
+            NPC a = byId.get(r.getNpcAId());
+            NPC b = byId.get(r.getNpcBId());
+            if (a == null || b == null) continue;
+            Map<String, Object> e = new LinkedHashMap<>();
+            e.put("id", r.getId());
+            e.put("source", r.getNpcAId());
+            e.put("target", r.getNpcBId());
+            e.put("sourceName", a.getName());
+            e.put("targetName", b.getName());
+            e.put("affinity", r.getAffinity());
+            e.put("type", r.getType());
+            e.put("note", r.getNote());
+            edges.add(e);
+        }
+        return Map.of(
+                "nodes", nodes,
+                "edges", edges,
+                "count", edges.size(),
+                "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
+    @GetMapping("/quest")
+    public Map<String, Object> getQuest() {
+        return questService.getQuestView();
+    }
+
+    @PostMapping("/quest/reset")
+    public Map<String, Object> resetQuest() {
+        return questService.resetQuest();
+    }
+
+    @GetMapping("/metrics/ai")
+    public Map<String, Object> aiMetrics() {
+        return aiMetricsService.snapshot();
+    }
+
+    @GetMapping("/decision/insights")
+    public Map<String, Object> decisionInsights() {
+        List<NPC> npcs = npcRepository.findAll();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        int ai = 0;
+        int rule = 0;
+        for (NPC n : npcs) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", n.getId());
+            row.put("name", n.getName());
+            row.put("occupation", n.getOccupation());
+            row.put("location", n.getCurrentLocation());
+            row.put("decision", n.getLastDecision());
+            row.put("reason", NPCSimulatorService.sanitizeDecisionReason(n.getLastDecisionReason()));
+            row.put("source", n.getLastDecisionSource() == null ? "-" : n.getLastDecisionSource());
+            row.put("at", n.getLastDecisionAt() == null ? null : n.getLastDecisionAt().toString());
+            if (n.getLastDecisionSource() != null && n.getLastDecisionSource().contains("AI")) {
+                ai++;
+            } else if (n.getLastDecisionSource() != null && n.getLastDecisionSource().contains("规则")) {
+                rule++;
+            }
+            rows.add(row);
+        }
+        WorldEventService.WorldModifiers mod = worldEventService.getModifiers();
+        Map<String, Object> world = new LinkedHashMap<>();
+        world.put("tag", mod.getActiveTag());
+        world.put("socialChanceMultiplier", mod.getSocialChanceMultiplier());
+        world.put("energyDrainMultiplier", mod.getEnergyDrainMultiplier());
+        world.put("investReturnBias", mod.getInvestReturnBias());
+        world.put("broadcast", worldEventService.getBroadcastMessage());
+
+        return Map.of(
+                "npcs", rows,
+                "summary", Map.of("aiCount", ai, "ruleCount", rule, "total", npcs.size()),
+                "worldModifiers", world,
+                "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
+    @GetMapping("/replay")
+    public Map<String, Object> replay(@RequestParam(defaultValue = "60") int limit) {
+        List<TownEvent> events = townEventService.recent(Math.min(100, Math.max(5, limit)));
+        // 时间升序便于回放
+        List<TownEvent> ascending = new ArrayList<>(events);
+        ascending.sort(Comparator.comparing(TownEvent::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())));
+        return Map.of(
+                "events", ascending,
+                "count", ascending.size(),
+                "timestamp", LocalDateTime.now().toString()
+        );
+    }
+
+    @GetMapping("/report/daily")
+    public Map<String, Object> dailyReport() {
+        List<TownEvent> events = townEventService.recent(12);
+        Map<String, Object> quest = questService.getQuestView();
+        Map<String, Long> byType = new LinkedHashMap<>();
+        for (TownEvent e : events) {
+            byType.merge(e.getType() == null ? "OTHER" : e.getType(), 1L, Long::sum);
+        }
+        List<String> headlines = events.stream()
+                .limit(6)
+                .map(e -> (e.getType() == null ? "" : e.getType() + " · ") + e.getTitle())
+                .toList();
+        return Map.of(
+                "title", "赛博小镇日报",
+                "generatedAt", LocalDateTime.now().toString(),
+                "npcCount", npcRepository.count(),
+                "quest", quest,
+                "eventTypeCounts", byType,
+                "headlines", headlines,
+                "broadcast", Optional.ofNullable(worldEventService.getBroadcastMessage()).orElse("平静的一天"),
+                "worldTag", worldEventService.getModifiers().getActiveTag()
+        );
+    }
+
+    @GetMapping("/saves")
+    public ResponseEntity<?> listSaves() {
+        try {
+            return ResponseEntity.ok(Map.of("slots", saveSlotService.listSlots()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/saves")
+    public ResponseEntity<?> saveNamed(@RequestBody Map<String, String> body) {
+        try {
+            String name = body == null ? null : body.get("name");
+            return ResponseEntity.ok(saveSlotService.saveSlot(name));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/saves/{name}/load")
+    public ResponseEntity<?> loadNamed(@PathVariable String name) {
+        try {
+            return ResponseEntity.ok(saveSlotService.loadSlot(name));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/saves/{name}")
+    public ResponseEntity<?> deleteNamed(@PathVariable String name) {
+        try {
+            return ResponseEntity.ok(saveSlotService.deleteSlot(name));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
     private <T> List<T> convertList(Object raw, Class<T> type) {
         if (!(raw instanceof List<?> list)) {
             return List.of();
@@ -791,6 +964,7 @@ public class TownController {
             status.put("lastDecision", npc.getLastDecision());
             status.put("lastDecisionReason", com.cybertown.service.NPCSimulatorService.sanitizeDecisionReason(npc.getLastDecisionReason()));
             status.put("lastDecisionAt", npc.getLastDecisionAt() == null ? null : npc.getLastDecisionAt().toString());
+            status.put("lastDecisionSource", npc.getLastDecisionSource());
 
             npcStatusList.add(status);
         }

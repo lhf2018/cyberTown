@@ -26,14 +26,15 @@ public class LangGraphConfig {
      */
     @Bean
     public ChatLanguageModel chatLanguageModel() {
-        // 检查是否有有效的API密钥
-        if (openaiApiKey == null || openaiApiKey.isEmpty() ||
-                openaiApiKey.contains("your-key") || openaiApiKey.contains("sk-your")) {
-            log.warn("未配置有效的OpenAI API密钥，LangGraph4j将使用纯工具模式");
+        if (openaiApiKey == null || openaiApiKey.isBlank()
+                || openaiApiKey.equalsIgnoreCase("todo")
+                || openaiApiKey.contains("your-key")
+                || openaiApiKey.contains("sk-your")) {
+            log.warn("未配置有效的 DeepSeek API Key（当前为占位符），AI 决策将不可用。请设置 DEEPSEEK_API_KEY 或 application-local.yml");
             return null;
         }
-
         try {
+            log.info("DeepSeek Chat 模型已配置（key 前缀 {}…）", openaiApiKey.substring(0, Math.min(7, openaiApiKey.length())));
             return OpenAiChatModel.builder()
                     .apiKey(openaiApiKey)
                     .baseUrl(openaiBaseUrl)

@@ -62,6 +62,8 @@ public class NPC {
     @Column(length = 1000)
     private String lastDecisionReason;
     private LocalDateTime lastDecisionAt;
+    @Column(length = 32)
+    private String lastDecisionSource;
 
     // 创建时自动设置时间
     @PrePersist

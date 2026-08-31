@@ -3,7 +3,8 @@
 ## 决策（LangChain4j / NPCBehaviorGraph）
 
 - 接口返回类型为 **String**（不要直接反序列化为 POJO，避免 `Expected BEGIN_OBJECT`）
-- 系统提示要求模型只输出纯 JSON：
+- **不向 AiServices 注册 tools**：避免模型反复调工具触发 `exceeded 10 sequential tool executions`
+- 系统提示要求：上下文已含状态与「工具预检」，直接决策；只输出纯 JSON：
 
 ```json
 {
@@ -18,9 +19,9 @@
 - 用户请求为 `key=value` 文本，关键字段：
   - 生理与长期属性、近期想法、对话影响
   - `新闻摘要` / `活跃世界事件` / `同地点熟人` / 天气与时段
-- 工具：`checkBasicNeeds`、`checkSchedule`、`checkSocial`、`checkLocation`
-- 解析结果写入 NPC：`lastDecision` / `lastDecisionReason` / `lastDecisionAt`
-- 失败时降级规则引擎；用户可见理由不得包含异常栈
+  - **工具预检**（Java 各调用一次后注入）：`checkBasicNeeds` / `checkSchedule` / `checkSocial` / `checkLocation`
+- 解析结果写入 NPC：`lastDecision` / `lastDecisionReason` / `lastDecisionAt` / `lastDecisionSource`
+- 失败时降级规则引擎；用户可见理由不得包含异常栈；指标记入 `AiMetricsService`
 
 ## 对话
 

@@ -2,11 +2,14 @@
 spring:
   application:
     name: cyber-town  # 应用名称，用于日志和服务发现
+  # 本地可建 application-local.yml（已 gitignore）覆盖密钥；或设环境变量 DEEPSEEK_API_KEY
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
 
   # ========== AI配置（DeepSeek） ==========
   ai:
     openai:
-      # API密钥：优先环境变量 DEEPSEEK_API_KEY，勿把真实 key 提交进仓库
+      # API密钥：优先环境变量；local profile 可用 application-local.yml
       api-key: ${DEEPSEEK_API_KEY:todo}
       # DeepSeek API端点（兼容OpenAI格式）
       base-url: https://api.deepseek.com

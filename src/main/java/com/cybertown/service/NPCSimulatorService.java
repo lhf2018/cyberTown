@@ -41,6 +41,7 @@ public class NPCSimulatorService {
     private final ModeService modeService;
     private final RelationshipRepository relationshipRepository;
     private final TownEventRepository townEventRepository;
+    private final QuestService questService;
 
     private final Random random = new Random();
 
@@ -104,6 +105,11 @@ public class NPCSimulatorService {
             lifeEventService.maybeTrigger();
         } catch (Exception e) {
             log.warn("人生事件处理失败: {}", e.getMessage());
+        }
+        try {
+            questService.onTownPulse();
+        } catch (Exception e) {
+            log.warn("周目标刷新失败: {}", e.getMessage());
         }
 
         long elapsedTime = System.currentTimeMillis() - startTime;
@@ -341,6 +347,7 @@ public class NPCSimulatorService {
         npc.setLastDecision(result.getDecision());
         npc.setLastDecisionReason(sanitizeDecisionReason(result.getReason()));
         npc.setLastDecisionAt(LocalDateTime.now());
+        npc.setLastDecisionSource(result.getSource() == null ? "未知" : result.getSource());
 
         // 更新位置（如果决策中包含位置信息）
         updateLocationFromDecision(npc, result.getDecision());

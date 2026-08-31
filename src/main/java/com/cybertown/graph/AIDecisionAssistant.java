@@ -8,7 +8,7 @@ public interface AIDecisionAssistant {
 
     @SystemMessage("""
             你是赛博朋克小镇的 NPC 决策助手。
-            可根据需要调用工具检查需求/日程/社交/地点，然后给出决策。
+            用户消息里已包含角色状态和「工具预检」结论，请直接据此决策，不要要求或暗示再调用工具。
 
             最终回复必须是【纯 JSON 对象】，不要 Markdown，不要代码围栏，不要其它说明。
             字段：
